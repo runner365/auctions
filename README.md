@@ -1,3 +1,4 @@
+English | [中文](README_cn.md)
 # Auctions
 
 A multi-auction smart contract project built with Foundry. This repository contains several auction mechanisms for selling ERC20 tokens, together with deployment scripts, Foundry tests, and a few shell helpers for Sepolia interaction.

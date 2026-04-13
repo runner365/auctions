@@ -1,3 +1,4 @@
+中文 | [English](README.md)
 # Auctions 项目说明
 
 这是一个基于 Foundry 的多拍卖智能合约工程，用于演示和测试多种常见拍卖机制在 Solidity 中的实现方式。项目围绕 ERC20 代币拍卖展开，包含合约源码、部署脚本、单元测试，以及若干用于 Sepolia 网络交互的 shell 脚本。
