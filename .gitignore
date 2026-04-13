@@ -1,0 +1,35 @@
+# Compiler files
+cache/
+out/
+
+# Foundry artifacts
+coverage/
+lcov.info
+.gas-snapshot
+
+# Build and dependency directories
+node_modules/
+dist/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+.env.local
+.env.*.local
+
+# Local secrets and key material
+*.key
+*.pem
+*.p12
+
+# macOS and editor temp files
+.DS_Store
+*.swp
+*.swo

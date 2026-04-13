@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+TOKEN_ADDRESS=0x8f5C717fc9e8727c670a407c3a053B79dD8c88E7
+DUTCH_AUCTION=0xDF96d490fc8cf1b14EA25bDb6d26e8D58f6Df0BE
+TOKEN_AMOUNT=100000000000000000000
+PRIVATE_KEY=$PRIVATE_KEY
+RPC_URL=https://ethereum-sepolia.publicnode.com
+
+cast send $TOKEN_ADDRESS "approve(address,uint256)" $DUTCH_AUCTION $TOKEN_AMOUNT \
+  --private-key $PRIVATE_KEY \
+  --rpc-url $RPC_URL
