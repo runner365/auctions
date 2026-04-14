@@ -5,12 +5,18 @@ import {EnglishAuctionStorage} from "./englishAuctionStorage.sol";
 import {EnglishAuctionLogic} from "./englishAuctionLogic.sol";
 
 contract EnglishAuctionProxy is EnglishAuctionStorage {
+    bytes32 private constant ADMIN_SLOT = bytes32(uint256(keccak256("english.auction.proxy.admin")) - 1);
+
+    event AdminUpdated(address indexed previousAdmin, address indexed newAdmin);
+
     address public immutable LOGIC;
 
     constructor(address _logic,
         uint256 _tokenAmount,
         uint256 _startPrice) {
         require(_logic != address(0), "Logic address must not be zero");
+        _setAdmin(msg.sender);
+
         LOGIC = _logic;
 
         (bool success, bytes memory data) = _logic.delegatecall(
@@ -19,7 +25,26 @@ contract EnglishAuctionProxy is EnglishAuctionStorage {
         require(success, _getRevertMsg(data));
     }
 
+    function admin() public view returns (address currentAdmin) {
+        bytes32 slot = ADMIN_SLOT;
+        assembly {
+            currentAdmin := sload(slot)
+        }
+    }
+    function setAdmin(address newAdmin) external {
+        require(msg.sender == admin(), "Only admin can call this function");
+        require(newAdmin != address(0), "Admin address cannot be zero");
 
+        address previousAdmin = admin();
+        _setAdmin(newAdmin);
+        emit AdminUpdated(previousAdmin, newAdmin);
+    }
+    function _setAdmin(address newAdmin) private {
+        bytes32 slot = ADMIN_SLOT;
+        assembly {
+            sstore(slot, newAdmin)
+        }
+    }
     function _getRevertMsg(bytes memory returnData) private pure returns (string memory) {
         if (returnData.length < 68) {
             return "delegatecall failed";

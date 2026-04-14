@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {VickreyAuctionStorage} from "./vickreyAuctionStorage.sol";
 import {VickreyAuctionLogic} from "./vickreyAuctionLogic.sol";
 
-contract VickreyAuctionProxy is ReentrancyGuard, VickreyAuctionStorage {
-    using SafeERC20 for IERC20;
-
+contract VickreyAuctionProxy is VickreyAuctionStorage {
+    bytes32 private constant ADMIN_SLOT = bytes32(uint256(keccak256("vickrey.auction.proxy.admin")) - 1);   
+    
     address public immutable LOGIC;
+
+    event AdminUpdated(address indexed previousAdmin, address indexed newAdmin);
 
     constructor(
         address _vickreyAuctionLogic,
@@ -19,13 +18,33 @@ contract VickreyAuctionProxy is ReentrancyGuard, VickreyAuctionStorage {
         uint256 _revealDuration,
         uint256 _endDuration) {
         require(_vickreyAuctionLogic != address(0), "Logic contract address cannot be zero");
-
+        _setAdmin(msg.sender);
         LOGIC = _vickreyAuctionLogic;
 
         (bool success, bytes memory returnData) = _vickreyAuctionLogic.delegatecall(
             abi.encodeWithSelector(VickreyAuctionLogic.initialize.selector, _startPrice, _commitDuration, _revealDuration, _endDuration)
         );
         require(success, _getRevertMsg(returnData));
+    }
+
+    function _setAdmin(address newAdmin) private {
+        bytes32 slot = ADMIN_SLOT;
+        assembly {
+            sstore(slot, newAdmin)
+        }
+    }
+    function admin() public view returns (address currentAdmin) {
+        bytes32 slot = ADMIN_SLOT;
+        assembly {
+            currentAdmin := sload(slot)
+        }
+    }
+    function setAdmin(address newAdmin) external {
+        require(msg.sender == admin(), "Only admin can call this function");
+        require(newAdmin != address(0), "Admin address cannot be zero");
+        address previousAdmin = admin();
+        _setAdmin(newAdmin);
+        emit AdminUpdated(previousAdmin, newAdmin);
     }
 
     function startAuction(address _token, uint256 _tokenAmount) external {

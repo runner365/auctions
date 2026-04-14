@@ -15,12 +15,13 @@ contract DutchAuctionLogic is ReentrancyGuard, DutchAuctionStorage {
         uint256 _minPrice,
         uint256 _duration
     ) external {
+        require(!initialized, "Auction is already initialized");
         require(_tokenAmount > 0, "Token amount must be greater than 0");
         require(_startPrice > 0, "Start price must be greater than 0");
         require(_minPrice > 0, "Min price must be greater than 0");
         require(_startPrice > _minPrice, "Start price must be greater than min price");
         require(_duration > 0, "Duration must be greater than 0");
-
+        initialized = true;
         seller = msg.sender;
         tokenAmount = _tokenAmount;
         startPrice = _startPrice;

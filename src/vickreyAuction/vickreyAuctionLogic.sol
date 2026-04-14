@@ -15,10 +15,12 @@ contract VickreyAuctionLogic is ReentrancyGuard, VickreyAuctionStorage {
         uint256 _revealDuration,
         uint256 _endDuration
     ) external {
+        require(!initialized, "Auction is already initialized");
         require(_startPrice > 0, "start price must be greater than 0");
         require(_commitDuration > 0, "Commit duration must be greater than 0");
         require(_revealDuration > 0, "Reveal duration must be greater than 0");
         require(_endDuration > 0, "End duration must be greater than 0");
+        initialized = true;
         status = AuctionStatus.Initialized;
         
         startPrice = _startPrice;

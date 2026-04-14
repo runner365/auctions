@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {DutchAuctionStorage} from "./dutchAuctionStorage.sol";
 import {DutchAuctionLogic} from "./dutchAuctionLogic.sol";
 
 contract DutchAuctionProxy is DutchAuctionStorage {
+    bytes32 private constant ADMIN_SLOT = bytes32(uint256(keccak256("dutch.auction.proxy.admin")) - 1);
+
+    event AdminUpdated(address indexed previousAdmin, address indexed newAdmin);
+
     address public immutable LOGIC;
 
     constructor(address _logic, 
@@ -15,12 +17,34 @@ contract DutchAuctionProxy is DutchAuctionStorage {
             uint256 _minPrice, 
             uint256 _duration) {
         require(_logic != address(0), "Logic contract address cannot be zero");
+        _setAdmin(msg.sender);
         LOGIC = _logic;
 
         (bool success, bytes memory returnData) = _logic.delegatecall(
             abi.encodeWithSelector(DutchAuctionLogic.initialize.selector, _tokenAmount, _startPrice, _minPrice, _duration)
         );
         require(success, _getRevertMsg(returnData));
+    }
+
+    modifier onlyAdmin() {
+        require(msg.sender == admin(), "Only admin can call this function");
+        _;
+    }
+
+    function admin() public view returns (address currentAdmin) {
+        bytes32 slot = ADMIN_SLOT;
+        assembly {
+            currentAdmin := sload(slot)
+        }
+    }
+
+    function setAdmin(address newAdmin) external onlyAdmin {
+        require(newAdmin != address(0), "Admin address cannot be zero");
+
+        address previousAdmin = admin();
+        _setAdmin(newAdmin);
+
+        emit AdminUpdated(previousAdmin, newAdmin);
     }
 
     function start(address _token) external {
@@ -76,5 +100,12 @@ contract DutchAuctionProxy is DutchAuctionStorage {
             returnData := add(returnData, 0x04)
         }
         return abi.decode(returnData, (string));
+    }
+
+    function _setAdmin(address newAdmin) internal {
+        bytes32 slot = ADMIN_SLOT;
+        assembly {
+            sstore(slot, newAdmin)
+        }
     }
 }

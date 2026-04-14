@@ -13,9 +13,11 @@ contract EnglishAuctionLogic is ReentrancyGuard, EnglishAuctionStorage {
         uint256 _tokenAmount,
         uint256 _startPrice
     ) external {
+        require(!initialized, "Auction is already initialized");
         require(_tokenAmount > 0, "Token amount must be greater than 0");
         require(_startPrice > 0, "Start price must be greater than 0");
 
+        initialized = true;
         highestBidder = address(0);
         highestBid = 0;
         SELLER = msg.sender;

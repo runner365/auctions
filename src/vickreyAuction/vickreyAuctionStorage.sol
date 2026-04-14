@@ -21,7 +21,7 @@ contract VickreyAuctionStorage is ReentrancyGuard {
         uint256 bidAmount;
         uint256 deposit;
     }
-
+    bool internal initialized;
     mapping(address => Bid) public bids;
     AuctionStatus public status;
 

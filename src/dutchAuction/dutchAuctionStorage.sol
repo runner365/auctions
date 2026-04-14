@@ -25,6 +25,7 @@ contract DutchAuctionStorage {
     event AuctionSold(address indexed buyer, address indexed seller,uint256 price);
     event AuctionWithdraw(address indexed seller);
 
+    bool internal initialized;
     address public seller;
     uint256 public tokenAmount;
     uint256 public startPrice;

@@ -31,6 +31,7 @@ contract EnglishAuctionStorage {
     event AuctionCancelled(address indexed seller);
     event AuctionReclaimed(address indexed seller);
     
+    bool internal initialized;
     address public SELLER;
     IERC20 public token;
     uint256 public tokenAmount;
