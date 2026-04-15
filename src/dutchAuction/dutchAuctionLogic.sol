@@ -23,6 +23,7 @@ contract DutchAuctionLogic is ReentrancyGuard, DutchAuctionStorage {
         require(_duration > 0, "Duration must be greater than 0");
         initialized = true;
         seller = msg.sender;
+        initialTokenAmount = _tokenAmount;
         tokenAmount = _tokenAmount;
         startPrice = _startPrice;
         minPrice = _minPrice;
@@ -63,7 +64,7 @@ contract DutchAuctionLogic is ReentrancyGuard, DutchAuctionStorage {
         emit AuctionStarted(seller, address(token), start_time, expire_time);
     }
 
-    function getCurrentPrice() public view returns (uint256) {
+    function _getCurrentPrice() private view returns (uint256) {
         if (block.timestamp >= expire_time) {
             return minPrice;
         }
@@ -73,15 +74,50 @@ contract DutchAuctionLogic is ReentrancyGuard, DutchAuctionStorage {
 
         return startPrice - priceDecrease;
     }
+    
+    function getCurrentPriceByAmount(uint256 _amount) public view returns (uint256) {
+        require(_amount > 0, "Amount must be greater than 0");
+        uint256 _currentPrice = _getCurrentPrice() * _amount / initialTokenAmount;
+        require(_currentPrice > 0, "Invalid price");
+        return _currentPrice;
+    }
 
     function buy() external payable nonReentrant auctionActive auctionNotExpired {
-        uint256 currentPrice = getCurrentPrice();
+        uint256 currentPrice = getCurrentPriceByAmount(tokenAmount);
         require(msg.value >= currentPrice, "Insufficient payment");
         
         status = AuctionStatus.Sold;//update status before transfer to prevent reentrancy attack
 
         // Transfer tokens to buyer
         token.safeTransfer(msg.sender, tokenAmount);
+
+        // Refund excess payment
+        if (msg.value > currentPrice) {
+            // use call instead of transfer to prevent issues with gas limits and reentrancy
+            (bool success, ) = payable(msg.sender).call{value: msg.value - currentPrice}("");
+            require(success, "Failed to refund excess payment");
+        }
+
+        // Transfer payment to seller
+        (bool sent, ) = payable(seller).call{value: currentPrice}("");
+        require(sent, "Failed to transfer payment to seller");
+
+        emit AuctionSold(msg.sender, seller, currentPrice);
+    }
+
+    function buySomeToken(uint256 _amount) external payable nonReentrant auctionActive auctionNotExpired {
+        require(_amount > 0, "Amount must be greater than 0");
+        require(_amount <= tokenAmount, "Not enough tokens left");
+
+        uint256 currentPrice = getCurrentPriceByAmount(_amount);
+        require(msg.value >= currentPrice, "Insufficient payment");
+        
+        tokenAmount -= _amount; //update token amount before transfer to prevent reentrancy attack
+        if (tokenAmount == 0) {
+            status = AuctionStatus.Sold;//update status before transfer to prevent reentrancy attack
+        }
+        // Transfer tokens to buyer
+        token.safeTransfer(msg.sender, _amount);
 
         // Refund excess payment
         if (msg.value > currentPrice) {

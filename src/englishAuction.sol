@@ -44,10 +44,12 @@ contract EnglishAuction is ReentrancyGuard {
     address public highestBidder;
     uint256 public highestBid;
     mapping(address => uint256) public pendingReturns;
+    bool public antiSniping;
 
     constructor(
         uint256 _tokenAmount,
-        uint256 _startPrice
+        uint256 _startPrice,
+        bool _antiSniping
     ) {
         require(_tokenAmount > 0, "Token amount must be greater than 0");
         require(_startPrice > 0, "Start price must be greater than 0");
@@ -57,6 +59,7 @@ contract EnglishAuction is ReentrancyGuard {
         SELLER = msg.sender;
         TOKEN_AMOUNT = _tokenAmount;
         START_PRICE = _startPrice;
+        antiSniping = _antiSniping;
         
         status = AuctionStatus.Initialized;
 
@@ -102,6 +105,12 @@ contract EnglishAuction is ReentrancyGuard {
         highestBidder = msg.sender;
         highestBid = msg.value;
 
+        // If anti-sniping is enabled and the bid is placed within the last 5 minutes, extend the auction by 5 minutes
+        if (antiSniping) {
+            if (expire_time - block.timestamp < 5 minutes) {
+                expire_time = block.timestamp + 5 minutes;
+            }
+        }
         emit AuctionBid(msg.sender, msg.value);
     }
 

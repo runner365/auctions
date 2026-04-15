@@ -89,9 +89,26 @@ contract VickreyAuctionProxy is VickreyAuctionStorage {
         require(success, _getRevertMsg(returnData));
     }
 
+    // loser can withdraw their deposit with penalty if they did not reveal their bid before the end of the auction, winner can claim the token and refund excess deposit if any
+    function withdrawButNotReveal() external {
+        (bool success, bytes memory returnData) = LOGIC.delegatecall(
+            abi.encodeWithSelector(VickreyAuctionLogic.withdrawButNotReveal.selector)
+        );
+        require(success, _getRevertMsg(returnData));
+    }
+
     function claim() external {
         (bool success, bytes memory returnData) = LOGIC.delegatecall(
             abi.encodeWithSelector(VickreyAuctionLogic.claim.selector)
+        );
+        require(success, _getRevertMsg(returnData));
+    }
+    
+    // punish the bidder who did not reveal their bid before the end of the auction,
+    // let the seller claim the half of the deposit as penalty, and the rest of the deposit will be refunded to the bidder
+    function claimOnBehalf() external {
+        (bool success, bytes memory returnData) = LOGIC.delegatecall(
+            abi.encodeWithSelector(VickreyAuctionLogic.claimOnBehalf.selector)
         );
         require(success, _getRevertMsg(returnData));
     }

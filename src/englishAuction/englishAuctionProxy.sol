@@ -13,14 +13,15 @@ contract EnglishAuctionProxy is EnglishAuctionStorage {
 
     constructor(address _logic,
         uint256 _tokenAmount,
-        uint256 _startPrice) {
+        uint256 _startPrice,
+        bool _antiSniping) {
         require(_logic != address(0), "Logic address must not be zero");
         _setAdmin(msg.sender);
 
         LOGIC = _logic;
 
         (bool success, bytes memory data) = _logic.delegatecall(
-            abi.encodeWithSelector(EnglishAuctionLogic.initialize.selector, _tokenAmount, _startPrice)
+            abi.encodeWithSelector(EnglishAuctionLogic.initialize.selector, _tokenAmount, _startPrice, _antiSniping)
         );
         require(success, _getRevertMsg(data));
     }

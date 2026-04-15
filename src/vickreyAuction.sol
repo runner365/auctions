@@ -20,9 +20,12 @@ contract VickreyAuction is ReentrancyGuard {
         bool revealed;
         uint256 bidAmount;
         uint256 deposit;
+        uint256 penaltyAmount;
+        bool withdrawPenalized;
     }
 
     mapping(address => Bid) public bids;
+    address[] public bidders;
     AuctionStatus public status;
 
     address public immutable SELLER;
@@ -44,6 +47,8 @@ contract VickreyAuction is ReentrancyGuard {
     IERC20 public token;
     uint256 public tokenAmount;
 
+    bool internal claimOnBehalfDone;
+
     event AuctionStarted(address indexed _seller, 
                         address indexed _token, 
                         uint256 _tokenAmount,
@@ -56,6 +61,8 @@ contract VickreyAuction is ReentrancyGuard {
     event BidCommitted(address indexed bidder);
     event BidRevealed(address indexed bidder, uint256 bidAmount);
     event AuctionEnded(address indexed winner, uint256 winningBid, uint256 secondHighestBid);
+    event PenaltyClaimed(address indexed bidder, uint256 penaltyAmount);
+    event BidPenalized(address indexed bidder, uint256 penaltyAmount);
 
     constructor(
         uint256 _startPrice,
@@ -76,6 +83,7 @@ contract VickreyAuction is ReentrancyGuard {
         highestBidder = address(0);
         bid4Seller = 0;
         sellerWithdrawn = false;
+        claimOnBehalfDone = false;
 
         COMMIT_DURATION = _commitDuration;
         REVEAL_DURATION = _revealDuration;
@@ -140,8 +148,11 @@ contract VickreyAuction is ReentrancyGuard {
             bidHash: _bidHash,
             revealed: false,
             bidAmount: 0,
-            deposit: msg.value
+            deposit: msg.value,
+            penaltyAmount: 0,
+            withdrawPenalized: false
         });
+        bidders.push(msg.sender);
 
         emit BidCommitted(msg.sender);
     }
@@ -159,6 +170,7 @@ contract VickreyAuction is ReentrancyGuard {
         
         bid.revealed = true;
         bid.bidAmount = _bidAmount;
+        bid.penaltyAmount = 0;
 
         if (_bidAmount > highestBid) {
             secondHighestBid = highestBid;
@@ -215,6 +227,34 @@ contract VickreyAuction is ReentrancyGuard {
         }
     }
 
+    function withdrawButNotReveal() external nonReentrant inStatus(AuctionStatus.EndAuctioned) {
+        require(status == AuctionStatus.EndAuctioned, "Auction not ended yet");
+        require(msg.sender != highestBidder, "Only non-winners can withdraw");
+
+        Bid storage bid = bids[msg.sender];
+        require(bid.bidHash != bytes32(0), "No bid committed");
+        require(!bid.revealed, "Bid already revealed");
+        require(bid.deposit > 0, "No deposit to withdraw");
+        require(!bid.withdrawPenalized, "Bid already penalized");
+        bid.withdrawPenalized = true;// Prevent re-entrancy
+
+        uint256 refundAmount = 0;
+        if (bid.penaltyAmount == 0) {
+            bid.penaltyAmount = bid.deposit / 2; // Penalize 50% of the deposit
+            refundAmount = bid.deposit - bid.penaltyAmount;
+        } else {
+            refundAmount = bid.deposit;
+        }
+
+        bid.deposit -= refundAmount; 
+        if (refundAmount > 0) {
+            (bool sent, ) = payable(msg.sender).call{value: refundAmount}("");
+            require(sent, "Failed to refund deposit");
+
+            emit PenaltyClaimed(msg.sender, refundAmount);
+        }
+    }
+
     // Winner can claim the token and refund excess deposit if any
     function claim() external nonReentrant {
         require(status == AuctionStatus.EndAuctioned, "Auction not ended yet");
@@ -229,13 +269,44 @@ contract VickreyAuction is ReentrancyGuard {
         
         token.safeTransfer(msg.sender, _tokenAmount);
         
-
         uint256 finalPrice = secondHighestBid > 0 ? secondHighestBid : highestBid;
         uint256 refundAmount = bid.deposit - finalPrice;
 
         if (refundAmount > 0) {
             (bool sent, ) = payable(msg.sender).call{value: refundAmount}("");
             require(sent, "Failed to refund excess deposit");
+        }
+    }
+
+    // punish the buyer for not revealing the bid, let the seller can claim half of the deposit as compensation after auction ended
+    function claimOnBehalf() external nonReentrant onlySeller inStatus(AuctionStatus.EndPhasedOut) {
+        require(status == AuctionStatus.EndAuctioned, "Auction not ended yet");
+        require(!claimOnBehalfDone, "Already claimed on behalf of loser");
+        require(bidders.length > 0, "No bids placed");
+        claimOnBehalfDone = true;
+
+        uint256 penaltyAmount = 0;
+        for (uint256 i = 0; i < bidders.length; i++) {
+            address bidderAddress = bidders[i];
+            Bid storage bid = bids[bidderAddress];
+            if (bid.bidHash != bytes32(0) && !bid.revealed && bid.deposit > 0) {
+                uint256 penalty = 0;
+                if (bid.penaltyAmount == 0) {
+                    bid.penaltyAmount = bid.deposit / 2; // Penalize 50% of the deposit
+                    penalty = bid.penaltyAmount;
+                } else {
+                    penalty = bid.deposit;
+                }
+                bid.deposit -= penalty;
+                penaltyAmount += penalty; // Add the penalty to the seller's claimable amount
+            }
+        }
+        // not require penaltyAmount > 0, because if it's 0, claimOnBehalf can be called again and again. it waste gas.
+        if (penaltyAmount > 0) {
+            (bool sent, ) = payable(SELLER).call{value: penaltyAmount}("");
+            require(sent, "Failed to pay seller");
+
+            emit BidPenalized(SELLER, penaltyAmount);
         }
     }
 }

@@ -61,6 +61,13 @@ contract DutchAuctionProxy is DutchAuctionStorage {
         require(success, _getRevertMsg(returnData));
     }
 
+    function buySomeToken(uint256 _amount) external payable {
+        (bool success, bytes memory returnData) = LOGIC.delegatecall(
+            abi.encodeWithSelector(DutchAuctionLogic.buySomeToken.selector, _amount)
+        );
+        require(success, _getRevertMsg(returnData));
+    }
+
     function withdraw() external {
         (bool success, bytes memory returnData) = LOGIC.delegatecall(
             abi.encodeWithSelector(DutchAuctionLogic.withdraw.selector)
@@ -75,18 +82,18 @@ contract DutchAuctionProxy is DutchAuctionStorage {
         require(success, _getRevertMsg(returnData));
     }
 
-    function getCurrentPrice() external view returns (uint256) {
+    function getCurrentPriceByAmount(uint256 _amount) external view returns (uint256) {
         (bool success, bytes memory returnData) = address(this).staticcall(
-            abi.encodeWithSelector(this.getCurrentPriceDelegate.selector)
+            abi.encodeWithSelector(this.getCurrentPriceByAmountDelegate.selector, _amount)
         );
         require(success, _getRevertMsg(returnData));
         return abi.decode(returnData, (uint256));
     }
 
-    function getCurrentPriceDelegate() external returns (uint256) {
+    function getCurrentPriceByAmountDelegate(uint256 _amount) external returns (uint256) {
         require(msg.sender == address(this), "Only self call");
         (bool success, bytes memory returnData) = LOGIC.delegatecall(
-            abi.encodeWithSelector(DutchAuctionLogic.getCurrentPrice.selector)
+            abi.encodeWithSelector(DutchAuctionLogic.getCurrentPriceByAmount.selector, _amount)
         );
         require(success, _getRevertMsg(returnData));
         return abi.decode(returnData, (uint256));

@@ -152,4 +152,374 @@ contract VickreyAuctionTest is Test {
         vm.expectRevert("Only non-winners can withdraw");
         auction.withdraw();
     }
+
+    // ==================== withdrawButNotReveal Tests ====================
+
+    function testWithdrawButNotRevealReturns50Percent() public {
+        bytes32 bidHash1 = _hashBid(5 ether, "b1-secret");
+        bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
+
+        vm.prank(bidder1);
+        auction.commitBid{value: 5 ether}(bidHash1);
+
+        vm.prank(bidder2);
+        auction.commitBid{value: 3 ether}(bidHash2);
+
+        _moveToRevealPhase();
+
+        vm.prank(bidder1);
+        auction.revealBid(5 ether, "b1-secret");
+        // bidder2 does NOT reveal
+
+        _moveToEndPhase();
+
+        vm.prank(bidder1);
+        auction.endAuction();
+
+        uint256 bidder2BalanceBefore = bidder2.balance;
+        vm.prank(bidder2);
+        auction.withdrawButNotReveal();
+
+        // bidder2 should receive 50% of deposit
+        assertEq(bidder2.balance, bidder2BalanceBefore + 1.5 ether);
+        
+        // penaltyAmount should be set to 50%
+        (, , , uint256 deposit, uint256 penalty, ) = auction.bids(bidder2);
+        assertEq(penalty, 1.5 ether);
+        assertEq(deposit, 1.5 ether); // remaining 50%
+    }
+
+    function testWithdrawButNotRevealOnlyNonWinner() public {
+        bytes32 bidHash1 = _hashBid(5 ether, "b1-secret");
+        bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
+
+        vm.prank(bidder1);
+        auction.commitBid{value: 5 ether}(bidHash1);
+
+        vm.prank(bidder2);
+        auction.commitBid{value: 3 ether}(bidHash2);
+
+        _moveToRevealPhase();
+
+        vm.prank(bidder1);
+        auction.revealBid(5 ether, "b1-secret");
+
+        vm.prank(bidder2);
+        auction.revealBid(3 ether, "b2-secret");
+
+        _moveToEndPhase();
+
+        vm.prank(bidder1);
+        auction.endAuction();
+
+        // Winner (bidder1) cannot call withdrawButNotReveal
+        vm.prank(bidder1);
+        vm.expectRevert("Only non-winners can withdraw");
+        auction.withdrawButNotReveal();
+    }
+
+    function testWithdrawButNotRevealOnlyUnrevealedBids() public {
+        bytes32 bidHash1 = _hashBid(5 ether, "b1-secret");
+        bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
+
+        vm.prank(bidder1);
+        auction.commitBid{value: 5 ether}(bidHash1);
+
+        vm.prank(bidder2);
+        auction.commitBid{value: 3 ether}(bidHash2);
+
+        _moveToRevealPhase();
+
+        vm.prank(bidder1);
+        auction.revealBid(5 ether, "b1-secret");
+
+        vm.prank(bidder2);
+        auction.revealBid(3 ether, "b2-secret");
+
+        _moveToEndPhase();
+
+        vm.prank(bidder1);
+        auction.endAuction();
+
+        // bidder2 revealed, so cannot use withdrawButNotReveal
+        vm.prank(bidder2);
+        vm.expectRevert("Bid already revealed");
+        auction.withdrawButNotReveal();
+    }
+
+    function testWithdrawButNotRevealCannotCallTwice() public {
+        bytes32 bidHash1 = _hashBid(5 ether, "b1-secret");
+        bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
+
+        vm.prank(bidder1);
+        auction.commitBid{value: 5 ether}(bidHash1);
+
+        vm.prank(bidder2);
+        auction.commitBid{value: 3 ether}(bidHash2);
+
+        _moveToRevealPhase();
+
+        vm.prank(bidder1);
+        auction.revealBid(5 ether, "b1-secret");
+        // bidder2 does NOT reveal
+
+        _moveToEndPhase();
+
+        vm.prank(bidder1);
+        auction.endAuction();
+
+        vm.prank(bidder2);
+        auction.withdrawButNotReveal();
+
+        // Second call should revert
+        vm.prank(bidder2);
+        vm.expectRevert("Bid already penalized");
+        auction.withdrawButNotReveal();
+    }
+
+    function testWithdrawButNotRevealRevertsWhenNoDeposit() public {
+        bytes32 bidHash1 = _hashBid(5 ether, "b1-secret");
+
+        vm.prank(bidder1);
+        auction.commitBid{value: 5 ether}(bidHash1);
+
+        _moveToRevealPhase();
+
+        vm.prank(bidder1);
+        auction.revealBid(5 ether, "b1-secret");
+
+        _moveToEndPhase();
+
+        vm.prank(bidder1);
+        auction.endAuction();
+
+        address bidder3 = makeAddr("bidder3");
+        vm.prank(bidder3);
+        vm.expectRevert("No bid committed");
+        auction.withdrawButNotReveal();
+    }
+
+    // ==================== claimOnBehalf Tests ====================
+
+    function testClaimOnBehalfCollectsPenalties() public {
+        bytes32 bidHash1 = _hashBid(5 ether, "b1-secret");
+        bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
+        bytes32 bidHash3 = _hashBid(2 ether, "b3-secret");
+
+        address bidder3 = makeAddr("bidder3");
+        vm.deal(bidder3, 10 ether);
+
+        vm.prank(bidder1);
+        auction.commitBid{value: 5 ether}(bidHash1);
+
+        vm.prank(bidder2);
+        auction.commitBid{value: 3 ether}(bidHash2);
+
+        vm.prank(bidder3);
+        auction.commitBid{value: 2 ether}(bidHash3);
+
+        _moveToRevealPhase();
+
+        vm.prank(bidder1);
+        auction.revealBid(5 ether, "b1-secret");
+        
+        // bidder2 and bidder3 do NOT reveal
+
+        _moveToEndPhase();
+
+        vm.prank(bidder1);
+        auction.endAuction();
+
+        uint256 sellerBalanceBefore = seller.balance;
+        vm.prank(seller);
+        auction.claimOnBehalf();
+
+        // seller should receive penalties from bidder2 and bidder3
+        // bidder2: 3 ether / 2 = 1.5 ether
+        // bidder3: 2 ether / 2 = 1 ether
+        // total: 2.5 ether
+        assertEq(seller.balance, sellerBalanceBefore + 2.5 ether);
+    }
+
+    function testClaimOnBehalfOnlyBySeller() public {
+        bytes32 bidHash1 = _hashBid(5 ether, "b1-secret");
+        bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
+
+        vm.prank(bidder1);
+        auction.commitBid{value: 5 ether}(bidHash1);
+
+        vm.prank(bidder2);
+        auction.commitBid{value: 3 ether}(bidHash2);
+
+        _moveToRevealPhase();
+
+        vm.prank(bidder1);
+        auction.revealBid(5 ether, "b1-secret");
+
+        _moveToEndPhase();
+
+        vm.prank(bidder1);
+        auction.endAuction();
+
+        vm.prank(bidder1);
+        vm.expectRevert("Only seller can claim on behalf of loser");
+        auction.claimOnBehalf();
+    }
+
+    function testClaimOnBehalfCannotCallTwice() public {
+        bytes32 bidHash1 = _hashBid(5 ether, "b1-secret");
+        bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
+
+        vm.prank(bidder1);
+        auction.commitBid{value: 5 ether}(bidHash1);
+
+        vm.prank(bidder2);
+        auction.commitBid{value: 3 ether}(bidHash2);
+
+        _moveToRevealPhase();
+
+        vm.prank(bidder1);
+        auction.revealBid(5 ether, "b1-secret");
+
+        _moveToEndPhase();
+
+        vm.prank(bidder1);
+        auction.endAuction();
+
+        vm.prank(seller);
+        auction.claimOnBehalf();
+
+        // Second call should revert
+        vm.prank(seller);
+        vm.expectRevert("Already claimed on behalf of loser");
+        auction.claimOnBehalf();
+    }
+
+    // ==================== withdrawButNotReveal + claimOnBehalf Interaction Tests ====================
+
+    function testWithdrawButNotRevealThenClaimOnBehalf() public {
+        bytes32 bidHash1 = _hashBid(5 ether, "b1-secret");
+        bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
+        bytes32 bidHash3 = _hashBid(2 ether, "b3-secret");
+
+        address bidder3 = makeAddr("bidder3");
+        vm.deal(bidder3, 10 ether);
+
+        vm.prank(bidder1);
+        auction.commitBid{value: 5 ether}(bidHash1);
+
+        vm.prank(bidder2);
+        auction.commitBid{value: 3 ether}(bidHash2);
+
+        vm.prank(bidder3);
+        auction.commitBid{value: 2 ether}(bidHash3);
+
+        _moveToRevealPhase();
+
+        vm.prank(bidder1);
+        auction.revealBid(5 ether, "b1-secret");
+        // bidder2 and bidder3 do NOT reveal
+
+        _moveToEndPhase();
+
+        vm.prank(bidder1);
+        auction.endAuction();
+
+        // bidder2 calls withdrawButNotReveal first
+        uint256 bidder2BalanceBefore = bidder2.balance;
+        vm.prank(bidder2);
+        auction.withdrawButNotReveal();
+        assertEq(bidder2.balance, bidder2BalanceBefore + 1.5 ether); // gets 50%
+
+        // seller calls claimOnBehalf
+        uint256 sellerBalanceBefore = seller.balance;
+        vm.prank(seller);
+        auction.claimOnBehalf();
+
+        // seller should receive:
+        // - 50% penalty from bidder2 (remaining after bidder2 withdrew)
+        // - 50% penalty from bidder3 (no prior withdrawal)
+        // Total: 1.5 + 1 = 2.5 ether
+        assertEq(seller.balance, sellerBalanceBefore + 2.5 ether);
+
+        // Verify final states
+        (, , , uint256 deposit2, , ) = auction.bids(bidder2);
+        assertEq(deposit2, 0); // bidder2's deposit fully consumed
+    }
+
+    function testClaimOnBehalfFirstThenWithdrawButNotReveal() public {
+        bytes32 bidHash1 = _hashBid(5 ether, "b1-secret");
+        bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
+
+        vm.prank(bidder1);
+        auction.commitBid{value: 5 ether}(bidHash1);
+
+        vm.prank(bidder2);
+        auction.commitBid{value: 3 ether}(bidHash2);
+
+        _moveToRevealPhase();
+
+        vm.prank(bidder1);
+        auction.revealBid(5 ether, "b1-secret");
+        // bidder2 does NOT reveal
+
+        _moveToEndPhase();
+
+        vm.prank(bidder1);
+        auction.endAuction();
+
+        // seller calls claimOnBehalf first
+        uint256 sellerBalanceBefore = seller.balance;
+        vm.prank(seller);
+        auction.claimOnBehalf();
+        assertEq(seller.balance, sellerBalanceBefore + 1.5 ether); // gets 50%
+
+        // bidder2 calls withdrawButNotReveal after
+        uint256 bidder2BalanceBefore = bidder2.balance;
+        vm.prank(bidder2);
+        auction.withdrawButNotReveal();
+        
+        // bidder2 should get remaining 50%
+        assertEq(bidder2.balance, bidder2BalanceBefore + 1.5 ether);
+
+        // Verify final states
+        (, , , uint256 deposit2, uint256 penalty2, ) = auction.bids(bidder2);
+        assertEq(deposit2, 0); // deposit fully consumed
+        assertEq(penalty2, 1.5 ether); // penalty amount recorded
+    }
+
+    function testPenaltyAlwaysHalf() public {
+        // Test that penalty is always 50% regardless of call order
+        bytes32 bidHash1 = _hashBid(6 ether, "b1-secret");
+        bytes32 bidHash2 = _hashBid(4 ether, "b2-secret");
+
+        vm.prank(bidder1);
+        auction.commitBid{value: 6 ether}(bidHash1);
+
+        vm.prank(bidder2);
+        auction.commitBid{value: 4 ether}(bidHash2);
+
+        _moveToRevealPhase();
+
+        vm.prank(bidder1);
+        auction.revealBid(6 ether, "b1-secret");
+
+        _moveToEndPhase();
+
+        vm.prank(bidder1);
+        auction.endAuction();
+
+        uint256 bidder2BalanceBefore = bidder2.balance;
+        uint256 sellerBalanceBefore = seller.balance;
+
+        vm.prank(bidder2);
+        auction.withdrawButNotReveal();
+
+        vm.prank(seller);
+        auction.claimOnBehalf();
+
+        // bidder2 gets 50%, seller gets 50%
+        assertEq(bidder2.balance, bidder2BalanceBefore + 2 ether); // 4 * 0.5
+        assertEq(seller.balance, sellerBalanceBefore + 2 ether); // 4 * 0.5
+    }
 }

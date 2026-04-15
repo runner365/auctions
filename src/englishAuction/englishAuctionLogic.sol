@@ -11,7 +11,8 @@ contract EnglishAuctionLogic is ReentrancyGuard, EnglishAuctionStorage {
 
     function initialize(
         uint256 _tokenAmount,
-        uint256 _startPrice
+        uint256 _startPrice,
+        bool _antiSniping
     ) external {
         require(!initialized, "Auction is already initialized");
         require(_tokenAmount > 0, "Token amount must be greater than 0");
@@ -27,6 +28,7 @@ contract EnglishAuctionLogic is ReentrancyGuard, EnglishAuctionStorage {
         expireTime = 0;
 
         status = AuctionStatus.Initialized;
+        antiSniping = _antiSniping;
 
         emit AuctionCreated(
             msg.sender,
@@ -70,6 +72,13 @@ contract EnglishAuctionLogic is ReentrancyGuard, EnglishAuctionStorage {
         highestBidder = msg.sender;
         highestBid = msg.value;
 
+
+        // If anti-sniping is enabled and the bid is placed within the last 5 minutes, extend the auction by 5 minutes
+        if (antiSniping) {
+            if (expireTime - block.timestamp < 5 minutes) {
+                expireTime = block.timestamp + 5 minutes;
+            }
+        }
         emit AuctionBid(msg.sender, msg.value);
     }
 

@@ -30,7 +30,8 @@ contract EnglishAuctionProxyTest is Test {
 
         token = new AuctionERC20("Auction Token", "AUCT", INITIAL_SUPPLY, seller);
         logic = new EnglishAuctionLogic();
-        proxy = new EnglishAuctionProxy(address(logic), TOKEN_AMOUNT, START_PRICE);
+        vm.prank(seller);
+        proxy = new EnglishAuctionProxy(address(logic), TOKEN_AMOUNT, START_PRICE, true);
     }
 
     function _startAuctionAsSeller() internal {
@@ -192,5 +193,44 @@ contract EnglishAuctionProxyTest is Test {
     function testGetCurrentPriceDelegateRevertsForExternalCall() public {
         vm.expectRevert("Only self call");
         proxy.getCurrentPriceDelegate();
+    }
+
+    function testAntiSnipingExtendsByFiveMinutesWhenBidInLastFiveMinutes() public {
+        _startAuctionAsSeller();
+
+        uint256 originalExpireTime = proxy.expireTime();
+
+        // Move into the last 4m59s and place a bid.
+        vm.warp(originalExpireTime - 4 minutes - 59 seconds);
+        vm.prank(bidder1);
+        proxy.bid{value: 2 ether}();
+
+        uint256 expectedExpireTime = block.timestamp + 5 minutes;
+        assertEq(proxy.expireTime(), expectedExpireTime);
+        assertGt(proxy.expireTime(), originalExpireTime);
+    }
+
+    function testDoneAuctionRevertsBeforeExtendedExpireTime() public {
+        _startAuctionAsSeller();
+
+        uint256 originalExpireTime = proxy.expireTime();
+
+        // Trigger extension in the last 5 minutes.
+        vm.warp(originalExpireTime - 4 minutes - 59 seconds);
+        vm.prank(bidder1);
+        proxy.bid{value: 2 ether}();
+
+        // Still before the extended deadline.
+        vm.warp(proxy.expireTime() - 1);
+        vm.prank(seller);
+        vm.expectRevert("Auction has not expired");
+        proxy.doneAuction();
+
+        // After extended deadline, auction can be settled.
+        vm.warp(proxy.expireTime() + 1);
+        vm.prank(seller);
+        proxy.doneAuction();
+
+        assertEq(uint256(proxy.status()), 2); // Sold
     }
 }

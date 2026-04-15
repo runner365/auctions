@@ -30,6 +30,7 @@ contract VickreyAuctionLogic is ReentrancyGuard, VickreyAuctionStorage {
         highestBidder = address(0);
         bid4Seller = 0;
         sellerWithdrawn = false;
+        claimedPenaltyDone = false;
 
         commitDuration = _commitDuration;
         revealDuration = _revealDuration;
@@ -94,9 +95,11 @@ contract VickreyAuctionLogic is ReentrancyGuard, VickreyAuctionStorage {
             bidHash: _bidHash,
             revealed: false,
             bidAmount: 0,
-            deposit: msg.value
+            deposit: msg.value,
+            penaltyAmount: 0,
+            withdrawPenalized: false
         });
-
+        bidders.push(msg.sender);
         emit BidCommitted(msg.sender);
     }
 
@@ -169,6 +172,34 @@ contract VickreyAuctionLogic is ReentrancyGuard, VickreyAuctionStorage {
         }
     }
 
+    // loser can withdraw their deposit with penalty if they did not reveal their bid before the end of the auction, winner can claim the token and refund excess deposit if any
+    function withdrawButNotReveal() external nonReentrant inStatus(AuctionStatus.EndAuctioned) {
+        require(status == AuctionStatus.EndAuctioned, "Auction not ended yet");
+        require(msg.sender != highestBidder, "Winner cannot call this function");
+
+        Bid storage bid = bids[msg.sender];
+        require(bid.bidHash != bytes32(0), "No bid committed");
+        require(!bid.revealed, "Bid already revealed");
+        require(bid.deposit > 0, "No deposit to withdraw");
+        require(!bid.withdrawPenalized, "Already withdrawn with penalty");
+        bid.withdrawPenalized = true;
+        
+        uint256 refundAmount = 0;
+        if (bid.penaltyAmount == 0) {
+            bid.penaltyAmount = bid.deposit / 2; // Penalize 50% of the deposit
+            refundAmount = bid.deposit - bid.penaltyAmount; // Refund the rest to the bidder
+        } else {
+            refundAmount = bid.deposit;
+        }
+        bid.deposit -= refundAmount; // Prevent re-entrancy and double claiming of penalty
+        if (refundAmount > 0) {
+            (bool sent, ) = payable(msg.sender).call{value: refundAmount}("");
+            require(sent, "Failed to refund deposit");
+
+            emit PenaltyClaimed(msg.sender, refundAmount);
+        }
+    }
+
     // Winner can claim the token and refund excess deposit if any
     function claim() external nonReentrant {
         require(status == AuctionStatus.EndAuctioned, "Auction not ended yet");
@@ -183,13 +214,44 @@ contract VickreyAuctionLogic is ReentrancyGuard, VickreyAuctionStorage {
         
         token.safeTransfer(msg.sender, _tokenAmount);
         
-
         uint256 finalPrice = secondHighestBid > 0 ? secondHighestBid : highestBid;
         uint256 refundAmount = bid.deposit - finalPrice;
 
         if (refundAmount > 0) {
             (bool sent, ) = payable(msg.sender).call{value: refundAmount}("");
             require(sent, "Failed to refund excess deposit");
+        }
+    }
+
+    // punish the bidder who did not reveal their bid before the end of the auction,
+    // let the seller claim the half of the deposit as penalty, and the rest of the deposit will be refunded to the bidder
+    function claimOnBehalf() external nonReentrant onlySeller inStatus(AuctionStatus.EndAuctioned) {
+        require(status == AuctionStatus.EndAuctioned, "Auction not ended yet");
+        require(!claimedPenaltyDone, "Already claimed on behalf of loser");
+        require(bidders.length > 0, "No bids placed");
+        claimedPenaltyDone = true;
+
+        uint256 penaltyAmount = 0;
+        for (uint256 i = 0; i < bidders.length; i++) {
+            address bidAddress = bidders[i];
+            Bid storage bid = bids[bidAddress];
+            if (bid.bidHash != bytes32(0) && !bid.revealed && bid.deposit > 0) {
+                uint256 penalty = 0;
+                if (bid.penaltyAmount == 0) {
+                    bid.penaltyAmount = bid.deposit / 2; // Penalize 50% of the deposit
+                    penalty = bid.penaltyAmount;
+                } else {
+                    penalty = bid.penaltyAmount; // If already penalized, use the existing penalty amount
+                }
+                bid.deposit -= penalty; // Prevent double claiming of penalty
+                penaltyAmount += penalty;
+            }
+        }
+        if (penaltyAmount > 0) {
+            (bool sent, ) = payable(seller).call{value: penaltyAmount}("");
+            require(sent, "Failed to pay penalty");
+
+            emit BidPenalized(seller, penaltyAmount);
         }
     }
 }

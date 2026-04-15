@@ -20,9 +20,12 @@ contract VickreyAuctionStorage is ReentrancyGuard {
         bool revealed;
         uint256 bidAmount;
         uint256 deposit;
+        uint256 penaltyAmount;
+        bool withdrawPenalized;
     }
     bool internal initialized;
     mapping(address => Bid) public bids;
+    address[] public bidders;
     AuctionStatus public status;
 
     address public seller;
@@ -44,6 +47,8 @@ contract VickreyAuctionStorage is ReentrancyGuard {
     IERC20 public token;
     uint256 public tokenAmount;
 
+    bool internal claimedPenaltyDone;
+
     event AuctionStarted(address indexed _seller, 
                         address indexed _token, 
                         uint256 _tokenAmount,
@@ -57,4 +62,6 @@ contract VickreyAuctionStorage is ReentrancyGuard {
     event BidRevealed(address indexed bidder, uint256 bidAmount);
     event AuctionEnded(address indexed winner, uint256 winningBid, uint256 secondHighestBid);
 
+    event PenaltyClaimed(address indexed bidder, uint256 penaltyAmount);
+    event BidPenalized(address indexed bidder, uint256 penaltyAmount);
 }

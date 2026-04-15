@@ -28,7 +28,7 @@ contract EnglishAuctionTest is Test {
 
         vm.startPrank(seller);
         token = new AuctionERC20("Auction Token", "AUCT", INITIAL_SUPPLY, seller);
-        auction = new EnglishAuction(TOKEN_AMOUNT, START_PRICE);
+        auction = new EnglishAuction(TOKEN_AMOUNT, START_PRICE, true);
 
         token.approve(address(auction), TOKEN_AMOUNT);
         auction.startAuction(address(token), DURATION);
@@ -91,5 +91,42 @@ contract EnglishAuctionTest is Test {
         assertEq(seller.balance, sellerBalanceBefore + 2 ether);
         assertEq(uint256(auction.status()), 2); // Sold
         assertEq(address(auction).balance, 0);
+    }
+
+    function testAntiSnipingExtendsByFiveMinutesWhenBidPlacedInLastFiveMinutes() public {
+        uint256 originalExpireTime = auction.expire_time();
+
+        // Move to the last 4 minutes 59 seconds of auction.
+        vm.warp(originalExpireTime - 4 minutes - 59 seconds);
+
+        vm.prank(bidder1);
+        auction.bid{value: 2 ether}();
+
+        uint256 expectedExpireTime = block.timestamp + 5 minutes;
+        assertEq(auction.expire_time(), expectedExpireTime);
+        assertGt(auction.expire_time(), originalExpireTime);
+    }
+
+    function testDoneAuctionRevertsBeforeExtendedExpireTime() public {
+        uint256 originalExpireTime = auction.expire_time();
+
+        // Trigger anti-sniping extension.
+        vm.warp(originalExpireTime - 4 minutes - 59 seconds);
+        vm.prank(bidder1);
+        auction.bid{value: 2 ether}();
+
+        // Still 1 second before the extended expiry.
+        vm.warp(auction.expire_time() - 1);
+
+        vm.prank(seller);
+        vm.expectRevert("Auction has not expired");
+        auction.doneAuction();
+
+        // After extended expiry, settlement should succeed.
+        vm.warp(auction.expire_time() + 1);
+        vm.prank(seller);
+        auction.doneAuction();
+
+        assertEq(uint256(auction.status()), 2); // Sold
     }
 }

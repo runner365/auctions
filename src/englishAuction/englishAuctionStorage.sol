@@ -42,4 +42,5 @@ contract EnglishAuctionStorage {
     address public highestBidder;
     uint256 public highestBid;
     mapping(address => uint256) public pendingReturns;
+    bool public antiSniping;
 }

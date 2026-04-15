@@ -30,6 +30,7 @@ contract DutchAuctionStorage {
     uint256 public tokenAmount;
     uint256 public startPrice;
     uint256 public minPrice;
+    uint256 public initialTokenAmount;
     uint256 public duration;
 
     IERC20 public token;
