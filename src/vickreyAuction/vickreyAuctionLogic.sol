@@ -4,24 +4,31 @@ pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {VickreyAuctionStorage} from "./vickreyAuctionStorage.sol";
 
-contract VickreyAuctionLogic is ReentrancyGuard, VickreyAuctionStorage {
+contract VickreyAuctionLogic is Initializable, UUPSUpgradeable, OwnableUpgradeable,ReentrancyGuard, VickreyAuctionStorage {
     using SafeERC20 for IERC20;
+
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(
         uint256 _startPrice,
         uint256 _commitDuration,
         uint256 _revealDuration,
         uint256 _endDuration
-    ) external {
-        require(!initialized, "Auction is already initialized");
+    ) external initializer {
         require(_startPrice > 0, "start price must be greater than 0");
         require(_commitDuration > 0, "Commit duration must be greater than 0");
         require(_revealDuration > 0, "Reveal duration must be greater than 0");
         require(_endDuration > 0, "End duration must be greater than 0");
-        initialized = true;
+        __Ownable_init(msg.sender);
         status = AuctionStatus.Initialized;
+        seller = msg.sender;
         
         startPrice = _startPrice;
 
@@ -35,14 +42,17 @@ contract VickreyAuctionLogic is ReentrancyGuard, VickreyAuctionStorage {
         commitDuration = _commitDuration;
         revealDuration = _revealDuration;
         endDuration = _endDuration;
+    }
 
-        seller = msg.sender;
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {
+        require(newImplementation != address(0), "Invalid implementation");
     }
 
     modifier onlySeller() {
         require(msg.sender == seller, "Only seller can call this function");
         _;
     }
+
     modifier inStatus(AuctionStatus _status) {
         /*
         enum AuctionStatus {
@@ -253,5 +263,12 @@ contract VickreyAuctionLogic is ReentrancyGuard, VickreyAuctionStorage {
 
             emit BidPenalized(seller, penaltyAmount);
         }
+    }
+
+    function changeSeller(address newSeller) external onlySeller {
+        require(newSeller != address(0), "Invalid new seller address");
+        address oldSeller = seller;
+        seller = newSeller;
+        emit SellerChanged(oldSeller, newSeller);
     }
 }

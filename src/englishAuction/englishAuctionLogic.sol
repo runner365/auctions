@@ -4,24 +4,31 @@ pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {EnglishAuctionStorage} from "./englishAuctionStorage.sol";
 
-contract EnglishAuctionLogic is ReentrancyGuard, EnglishAuctionStorage {
+contract EnglishAuctionLogic is Initializable, UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuard, EnglishAuctionStorage {
     using SafeERC20 for IERC20;
+
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(
         uint256 _tokenAmount,
         uint256 _startPrice,
         bool _antiSniping
-    ) external {
+    ) external initializer {
         require(!initialized, "Auction is already initialized");
         require(_tokenAmount > 0, "Token amount must be greater than 0");
         require(_startPrice > 0, "Start price must be greater than 0");
-
-        initialized = true;
+        __Ownable_init(msg.sender);
+        seller = msg.sender;
         highestBidder = address(0);
         highestBid = 0;
-        SELLER = msg.sender;
+        
         tokenAmount = _tokenAmount;
         startPrice = _startPrice;
         startTime = 0;
@@ -37,8 +44,12 @@ contract EnglishAuctionLogic is ReentrancyGuard, EnglishAuctionStorage {
         );
     }
 
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {
+        require(newImplementation != address(0), "Invalid implementation address");
+    }
+
     modifier onlySeller {
-        require(msg.sender == SELLER, "Only seller can call this function");
+        require(msg.sender == seller, "Only seller can call this function");
         _;
     }
     modifier notExpired {
@@ -56,8 +67,8 @@ contract EnglishAuctionLogic is ReentrancyGuard, EnglishAuctionStorage {
         expireTime = block.timestamp + _duration;
         status = AuctionStatus.Active;
 
-        token.safeTransferFrom(msg.sender, address(this), tokenAmount);
-        emit AuctionStarted(msg.sender, address(token), startTime, expireTime);
+        token.safeTransferFrom(seller, address(this), tokenAmount);
+        emit AuctionStarted(seller, address(token), startTime, expireTime);
     }
 
     function bid() external payable nonReentrant notExpired {
@@ -104,9 +115,9 @@ contract EnglishAuctionLogic is ReentrancyGuard, EnglishAuctionStorage {
         status = AuctionStatus.Sold;
         token.safeTransfer(highestBidder, tokenAmount);
 
-        (bool sent, ) = payable(SELLER).call{value: highestBid}("");
+        (bool sent, ) = payable(seller).call{value: highestBid}("");
         require(sent, "Failed to send funds to seller");
-        emit AuctionSold(highestBidder, SELLER, highestBid);
+        emit AuctionSold(highestBidder, seller, highestBid);
     }
 
     function getCurrentPrice() external view returns (uint256) {
@@ -124,8 +135,8 @@ contract EnglishAuctionLogic is ReentrancyGuard, EnglishAuctionStorage {
         require(block.timestamp > expireTime, "Auction has not expired");
         require(highestBidder == address(0), "Cannot reclaim with active bid");
         status = AuctionStatus.Cancelled;
-        token.safeTransfer(SELLER, tokenAmount);
-        emit AuctionReclaimed(SELLER);
+        token.safeTransfer(seller, tokenAmount);
+        emit AuctionReclaimed(seller);
     }
 
     function cancelAuction() external onlySeller nonReentrant {
@@ -135,7 +146,7 @@ contract EnglishAuctionLogic is ReentrancyGuard, EnglishAuctionStorage {
 
         status = AuctionStatus.Cancelled;
 
-        token.safeTransfer(SELLER, tokenAmount);
-        emit AuctionCancelled(msg.sender);
+        token.safeTransfer(seller, tokenAmount);
+        emit AuctionCancelled(seller);
     }
 }

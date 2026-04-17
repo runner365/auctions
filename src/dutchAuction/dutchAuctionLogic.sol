@@ -4,23 +4,36 @@ pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {DutchAuctionStorage} from "./dutchAuctionStorage.sol";
 
-contract DutchAuctionLogic is ReentrancyGuard, DutchAuctionStorage {
+contract DutchAuctionLogic is Initializable, 
+                            UUPSUpgradeable, 
+                            OwnableUpgradeable, 
+                            ReentrancyGuard, 
+                            DutchAuctionStorage {
     using SafeERC20 for IERC20;
+
+    constructor() {
+        _disableInitializers();
+    }
 
     function initialize(
         uint256 _tokenAmount,
         uint256 _startPrice,
         uint256 _minPrice,
         uint256 _duration
-    ) external {
+    ) external initializer {
         require(!initialized, "Auction is already initialized");
         require(_tokenAmount > 0, "Token amount must be greater than 0");
         require(_startPrice > 0, "Start price must be greater than 0");
         require(_minPrice > 0, "Min price must be greater than 0");
         require(_startPrice > _minPrice, "Start price must be greater than min price");
         require(_duration > 0, "Duration must be greater than 0");
+        
+        __Ownable_init(msg.sender);
         initialized = true;
         seller = msg.sender;
         initialTokenAmount = _tokenAmount;
@@ -37,6 +50,10 @@ contract DutchAuctionLogic is ReentrancyGuard, DutchAuctionStorage {
             _startPrice,
             _minPrice
         );
+    }
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {
+        require(newImplementation != address(0), "Invalid implementation address");
     }
 
     modifier onlySeller() {

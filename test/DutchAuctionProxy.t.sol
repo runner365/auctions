@@ -7,6 +7,7 @@ import {DutchAuctionLogic} from "../src/dutchAuction/dutchAuctionLogic.sol";
 import {DutchAuctionProxy} from "../src/dutchAuction/dutchAuctionProxy.sol";
 
 contract DutchAuctionProxyTest is Test {
+    DutchAuctionLogic internal auction;
     DutchAuctionLogic internal logic;
     DutchAuctionProxy internal proxy;
     AuctionERC20 internal token;
@@ -26,17 +27,18 @@ contract DutchAuctionProxyTest is Test {
 
         vm.deal(buyer, 20 ether);
 
+        vm.startPrank(seller);
         token = new AuctionERC20("Dutch Token", "DUT", INITIAL_SUPPLY, seller);
         logic = new DutchAuctionLogic();
-
-        vm.prank(seller);
         proxy = new DutchAuctionProxy(
             address(logic),
-            TOKEN_AMOUNT,
-            START_PRICE,
-            MIN_PRICE,
-            DURATION
+            abi.encodeCall(
+                DutchAuctionLogic.initialize,
+                (TOKEN_AMOUNT, START_PRICE, MIN_PRICE, DURATION)
+            )
         );
+        auction = DutchAuctionLogic(address(proxy));
+        vm.stopPrank();
     }
 
     // ─── helpers ───────────────────────────────────────────────────────────────
@@ -44,7 +46,7 @@ contract DutchAuctionProxyTest is Test {
     function _startAsSeller() internal {
         vm.startPrank(seller);
         token.approve(address(proxy), TOKEN_AMOUNT);
-        proxy.start(address(token));
+        auction.start(address(token));
         vm.stopPrank();
     }
 
@@ -53,26 +55,26 @@ contract DutchAuctionProxyTest is Test {
     function testStartSetsActiveStatusAndMovesToken() public {
         _startAsSeller();
 
-        assertEq(uint256(proxy.status()), 1); // Active
-        assertEq(address(proxy.token()), address(token));
-        assertEq(proxy.tokenAmount(), TOKEN_AMOUNT);
+        assertEq(uint256(auction.status()), 1); // Active
+        assertEq(address(auction.token()), address(token));
+        assertEq(auction.tokenAmount(), TOKEN_AMOUNT);
 
-        // proxy holds the token, seller no longer has it
-        assertEq(token.balanceOf(address(proxy)), TOKEN_AMOUNT);
+        // auction holds the token, seller no longer has it
+        assertEq(token.balanceOf(address(auction)), TOKEN_AMOUNT);
         assertEq(token.balanceOf(seller), INITIAL_SUPPLY - TOKEN_AMOUNT);
 
         // timing is set
-        assertEq(proxy.expire_time(), proxy.start_time() + DURATION);
+        assertEq(auction.expire_time(), auction.start_time() + DURATION);
     }
 
     function testStartRevertsIfNotSeller() public {
         vm.startPrank(seller);
-        token.approve(address(proxy), TOKEN_AMOUNT);
+        token.approve(address(auction), TOKEN_AMOUNT);
         vm.stopPrank();
 
         vm.prank(buyer);
         vm.expectRevert("Only seller can call this function");
-        proxy.start(address(token));
+        auction.start(address(token));
     }
 
     function testStartRevertsIfAlreadyActive() public {
@@ -80,7 +82,7 @@ contract DutchAuctionProxyTest is Test {
 
         vm.startPrank(seller);
         vm.expectRevert("Auction is already active");
-        proxy.start(address(token));
+        auction.start(address(token));
         vm.stopPrank();
     }
 
@@ -89,14 +91,14 @@ contract DutchAuctionProxyTest is Test {
     function testGetCurrentPriceAtStart() public {
         _startAsSeller();
         // right at start: no time elapsed, price should equal startPrice
-        assertEq(proxy.getCurrentPriceByAmount(TOKEN_AMOUNT), START_PRICE);
+        assertEq(auction.getCurrentPriceByAmount(TOKEN_AMOUNT), START_PRICE);
     }
 
     function testGetCurrentPriceDecreasesMidway() public {
         _startAsSeller();
 
-        vm.warp(proxy.start_time() + DURATION / 2);
-        uint256 price = proxy.getCurrentPriceByAmount(TOKEN_AMOUNT);
+        vm.warp(auction.start_time() + DURATION / 2);
+        uint256 price = auction.getCurrentPriceByAmount(TOKEN_AMOUNT);
 
         // midway price should be between min and start
         assertGt(price, MIN_PRICE);
@@ -108,15 +110,15 @@ contract DutchAuctionProxyTest is Test {
 
     function testGetCurrentPriceReturnsMinPriceAfterExpiry() public {
         _startAsSeller();
-        vm.warp(proxy.expire_time() + 1);
-        assertEq(proxy.getCurrentPriceByAmount(TOKEN_AMOUNT), MIN_PRICE);
+        vm.warp(auction.expire_time() + 1);
+        assertEq(auction.getCurrentPriceByAmount(TOKEN_AMOUNT), MIN_PRICE);
     }
 
     function testGetCurrentPriceUsesProxyStorage() public {
         _startAsSeller();
         // logic contract storage is unmodified (proxy storage was set via delegatecall)
         assertEq(logic.startPrice(), 0);
-        assertEq(proxy.startPrice(), START_PRICE);
+        assertEq(auction.startPrice(), START_PRICE);
     }
 
     // ─── buy() ─────────────────────────────────────────────────────────────────
@@ -124,35 +126,35 @@ contract DutchAuctionProxyTest is Test {
     function testBuyAtStartPriceSetsStatusSoldAndTransfersToken() public {
         _startAsSeller();
 
-        uint256 price = proxy.getCurrentPriceByAmount(TOKEN_AMOUNT); // == START_PRICE
+        uint256 price = auction.getCurrentPriceByAmount(TOKEN_AMOUNT); // == START_PRICE
         uint256 sellerBalanceBefore = seller.balance;
 
         vm.prank(buyer);
-        proxy.buy{value: price}();
+        auction.buy{value: price}();
 
         // status becomes Sold (index 2)
-        assertEq(uint256(proxy.status()), 2);
+        assertEq(uint256(auction.status()), 2);
 
         // buyer receives the tokens
         assertEq(token.balanceOf(buyer), TOKEN_AMOUNT);
-        assertEq(token.balanceOf(address(proxy)), 0);
+        assertEq(token.balanceOf(address(auction)), 0);
 
         // seller receives the payment
         assertEq(seller.balance, sellerBalanceBefore + price);
 
         // proxy holds no ETH
-        assertEq(address(proxy).balance, 0);
+        assertEq(address(auction).balance, 0);
     }
 
     function testBuyRefundsExcessPayment() public {
         _startAsSeller();
 
-        uint256 price = proxy.getCurrentPriceByAmount(TOKEN_AMOUNT);
+        uint256 price = auction.getCurrentPriceByAmount(TOKEN_AMOUNT);
         uint256 overpay = price + 3 ether;
         uint256 buyerBalanceBefore = buyer.balance;
 
         vm.prank(buyer);
-        proxy.buy{value: overpay}();
+        auction.buy{value: overpay}();
 
         // buyer gets back the excess (only price is deducted)
         assertEq(buyer.balance, buyerBalanceBefore - price);
@@ -163,16 +165,16 @@ contract DutchAuctionProxyTest is Test {
 
         vm.prank(buyer);
         vm.expectRevert("Insufficient payment");
-        proxy.buy{value: MIN_PRICE - 1}();
+        auction.buy{value: MIN_PRICE - 1}();
     }
 
     function testBuyRevertsAfterExpiry() public {
         _startAsSeller();
-        vm.warp(proxy.expire_time() + 1);
+        vm.warp(auction.expire_time() + 1);
 
         vm.prank(buyer);
         vm.expectRevert("Auction has expired");
-        proxy.buy{value: MIN_PRICE}();
+        auction.buy{value: MIN_PRICE}();
     }
 
     // ─── buySomeToken() ─────────────────────────────────────────────────────
@@ -181,28 +183,28 @@ contract DutchAuctionProxyTest is Test {
         _startAsSeller();
 
         uint256 amount = 40 ether;
-        uint256 price = proxy.getCurrentPriceByAmount(amount);
+        uint256 price = auction.getCurrentPriceByAmount(amount);
 
         vm.prank(buyer);
-        proxy.buySomeToken{value: price}(amount);
+        auction.buySomeToken{value: price}(amount);
 
         assertEq(token.balanceOf(buyer), amount);
-        assertEq(proxy.tokenAmount(), TOKEN_AMOUNT - amount);
-        assertEq(uint256(proxy.status()), 1); // Active
-        assertEq(address(proxy).balance, 0);
+        assertEq(auction.tokenAmount(), TOKEN_AMOUNT - amount);
+        assertEq(uint256(auction.status()), 1); // Active
+        assertEq(address(auction).balance, 0);
     }
 
     function testBuyWithAmountAllRemainingSetsSold() public {
         _startAsSeller();
 
         uint256 amount = TOKEN_AMOUNT;
-        uint256 price = proxy.getCurrentPriceByAmount(amount);
+        uint256 price = auction.getCurrentPriceByAmount(amount);
 
         vm.prank(buyer);
-        proxy.buySomeToken{value: price}(amount);
+        auction.buySomeToken{value: price}(amount);
 
-        assertEq(proxy.tokenAmount(), 0);
-        assertEq(uint256(proxy.status()), 2); // Sold
+        assertEq(auction.tokenAmount(), 0);
+        assertEq(uint256(auction.status()), 2); // Sold
         assertEq(token.balanceOf(buyer), TOKEN_AMOUNT);
     }
 
@@ -210,26 +212,26 @@ contract DutchAuctionProxyTest is Test {
         _startAsSeller();
 
         uint256 amount = 40 ether;
-        uint256 price = proxy.getCurrentPriceByAmount(amount);
+        uint256 price = auction.getCurrentPriceByAmount(amount);
         uint256 overpay = price + 1 ether;
         uint256 buyerBalanceBefore = buyer.balance;
 
         vm.prank(buyer);
-        proxy.buySomeToken{value: overpay}(amount);
+        auction.buySomeToken{value: overpay}(amount);
 
         assertEq(buyer.balance, buyerBalanceBefore - price);
-        assertEq(address(proxy).balance, 0);
+        assertEq(address(auction).balance, 0);
     }
 
     function testBuyWithAmountRevertsIfInsufficientPayment() public {
         _startAsSeller();
 
         uint256 amount = 40 ether;
-        uint256 price = proxy.getCurrentPriceByAmount(amount);
+        uint256 price = auction.getCurrentPriceByAmount(amount);
         
         vm.prank(buyer);
         vm.expectRevert("Insufficient payment");
-        proxy.buySomeToken{value: price - 1}(amount);
+        auction.buySomeToken{value: price - 1}(amount);
     }
 
     function testBuyWithAmountRevertsIfAmountExceedsAvailable() public {
@@ -238,7 +240,7 @@ contract DutchAuctionProxyTest is Test {
         vm.prank(buyer);
         vm.expectRevert("Not enough tokens left");
         // buyer has only 20 ether
-        proxy.buySomeToken{value: 20 ether}(TOKEN_AMOUNT + 1);
+        auction.buySomeToken{value: 20 ether}(TOKEN_AMOUNT + 1);
     }
 
     // ─── withdraw() ────────────────────────────────────────────────────────────
@@ -246,17 +248,17 @@ contract DutchAuctionProxyTest is Test {
     function testWithdrawAfterExpiryReturnsTokenToSeller() public {
         _startAsSeller();
 
-        vm.warp(proxy.expire_time());
+        vm.warp(auction.expire_time() + 1);
 
         vm.prank(seller);
-        proxy.withdraw();
+        auction.withdraw();
 
         // status becomes Expired (index 4)
-        assertEq(uint256(proxy.status()), 4);
+        assertEq(uint256(auction.status()), 4);
 
         // seller gets all tokens back
         assertEq(token.balanceOf(seller), INITIAL_SUPPLY);
-        assertEq(token.balanceOf(address(proxy)), 0);
+        assertEq(token.balanceOf(address(auction)), 0);
     }
 
     function testWithdrawRevertsBeforeExpiry() public {
@@ -264,16 +266,16 @@ contract DutchAuctionProxyTest is Test {
 
         vm.expectRevert("Auction has not expired");
         vm.prank(seller);
-        proxy.withdraw();
+        auction.withdraw();
     }
 
     function testWithdrawRevertsIfNotSeller() public {
         _startAsSeller();
-        vm.warp(proxy.expire_time());
+        vm.warp(auction.expire_time());
 
         vm.prank(buyer);
         vm.expectRevert("Only seller can call this function");
-        proxy.withdraw();
+        auction.withdraw();
     }
 
     // ─── cancel() ──────────────────────────────────────────────────────────────
@@ -282,23 +284,23 @@ contract DutchAuctionProxyTest is Test {
         _startAsSeller();
 
         vm.prank(seller);
-        proxy.cancel();
+        auction.cancel();
 
         // status becomes Cancelled (index 3)
-        assertEq(uint256(proxy.status()), 3);
+        assertEq(uint256(auction.status()), 3);
 
         // seller gets all tokens back
         assertEq(token.balanceOf(seller), INITIAL_SUPPLY);
-        assertEq(token.balanceOf(address(proxy)), 0);
+        assertEq(token.balanceOf(address(auction)), 0);
     }
 
     function testCancelRevertsAfterExpiry() public {
         _startAsSeller();
-        vm.warp(proxy.expire_time() + 1);
+        vm.warp(auction.expire_time() + 1);
 
         vm.expectRevert("Auction has expired");
         vm.prank(seller);
-        proxy.cancel();
+        auction.cancel();
     }
 
     function testCancelRevertsIfNotSeller() public {
@@ -306,6 +308,6 @@ contract DutchAuctionProxyTest is Test {
 
         vm.prank(buyer);
         vm.expectRevert("Only seller can call this function");
-        proxy.cancel();
+        auction.cancel();
     }
 }

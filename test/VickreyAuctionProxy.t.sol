@@ -9,6 +9,7 @@ import {VickreyAuctionProxy} from "../src/vickreyAuction/vickreyAuctionProxy.sol
 contract VickreyAuctionProxyTest is Test {
     VickreyAuctionLogic internal logic;
     VickreyAuctionProxy internal proxy;
+    VickreyAuctionLogic internal auction;
     AuctionERC20 internal token;
 
     address internal seller;
@@ -36,11 +37,12 @@ contract VickreyAuctionProxyTest is Test {
         vm.prank(seller);
         proxy = new VickreyAuctionProxy(
             address(logic),
-            START_PRICE,
-            COMMIT_DURATION,
-            REVEAL_DURATION,
-            END_DURATION
+            abi.encodeCall(
+                VickreyAuctionLogic.initialize,
+                (START_PRICE, COMMIT_DURATION, REVEAL_DURATION, END_DURATION)
+            )
         );
+        auction = VickreyAuctionLogic(address(proxy));
     }
 
     function _hashBid(uint256 amount, string memory secret) internal pure returns (bytes32) {
@@ -49,17 +51,17 @@ contract VickreyAuctionProxyTest is Test {
 
     function _startAuctionAsSeller() internal {
         vm.startPrank(seller);
-        token.approve(address(proxy), TOKEN_AMOUNT);
-        proxy.startAuction(address(token), TOKEN_AMOUNT);
+        token.approve(address(auction), TOKEN_AMOUNT);
+        auction.startAuction(address(token), TOKEN_AMOUNT);
         vm.stopPrank();
     }
 
     function _moveToRevealPhase() internal {
-        vm.warp(proxy.commitEndTime() + 1);
+        vm.warp(auction.commitEndTime() + 1);
     }
 
     function _moveToEndPhase() internal {
-        vm.warp(proxy.revealEndTime() + 1);
+        vm.warp(auction.revealEndTime() + 1);
     }
 
     function _runTwoBidderFlow() internal {
@@ -67,31 +69,31 @@ contract VickreyAuctionProxyTest is Test {
         bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
 
         vm.prank(bidder1);
-        proxy.commitBid{value: 5 ether}(bidHash1);
+        auction.commitBid{value: 5 ether}(bidHash1);
 
         vm.prank(bidder2);
-        proxy.commitBid{value: 3 ether}(bidHash2);
+        auction.commitBid{value: 3 ether}(bidHash2);
 
         _moveToRevealPhase();
 
         vm.prank(bidder1);
-        proxy.revealBid(5 ether, "b1-secret");
+        auction.revealBid(5 ether, "b1-secret");
 
         vm.prank(bidder2);
-        proxy.revealBid(3 ether, "b2-secret");
+        auction.revealBid(3 ether, "b2-secret");
 
         _moveToEndPhase();
 
         vm.prank(bidder1);
-        proxy.endAuction();
+        auction.endAuction();
     }
 
     function testStartAuctionSetsStateAndTokenOwnership() public {
         _startAuctionAsSeller();
 
-        assertEq(uint256(proxy.status()), 1); // Committing
-        assertEq(address(proxy.token()), address(token));
-        assertEq(proxy.tokenAmount(), TOKEN_AMOUNT);
+        assertEq(uint256(auction.status()), 1); // Committing
+        assertEq(address(auction.token()), address(token));
+        assertEq(auction.tokenAmount(), TOKEN_AMOUNT);
 
         assertEq(token.balanceOf(address(proxy)), TOKEN_AMOUNT);
         assertEq(token.balanceOf(seller), INITIAL_SUPPLY - TOKEN_AMOUNT);
@@ -100,7 +102,7 @@ contract VickreyAuctionProxyTest is Test {
     function testStartAuctionRevertsWhenNotSeller() public {
         vm.prank(bidder1);
         vm.expectRevert("Only seller can call this function");
-        proxy.startAuction(address(token), TOKEN_AMOUNT);
+        auction.startAuction(address(token), TOKEN_AMOUNT);
     }
 
     function testCommitAndRevealUpdateBids() public {
@@ -110,33 +112,33 @@ contract VickreyAuctionProxyTest is Test {
         bytes32 bidHash2 = _hashBid(2 ether, "s2");
 
         vm.prank(bidder1);
-        proxy.commitBid{value: 4 ether}(bidHash1);
+        auction.commitBid{value: 4 ether}(bidHash1);
 
         vm.prank(bidder2);
-        proxy.commitBid{value: 2 ether}(bidHash2);
+        auction.commitBid{value: 2 ether}(bidHash2);
 
         _moveToRevealPhase();
 
         vm.prank(bidder1);
-        proxy.revealBid(4 ether, "s1");
+        auction.revealBid(4 ether, "s1");
 
         vm.prank(bidder2);
-        proxy.revealBid(2 ether, "s2");
+        auction.revealBid(2 ether, "s2");
 
-        assertEq(uint256(proxy.status()), 2); // Revealing
-        assertEq(proxy.highestBid(), 4 ether);
-        assertEq(proxy.secondHighestBid(), 2 ether);
-        assertEq(proxy.highestBidder(), bidder1);
+        assertEq(uint256(auction.status()), 2); // Revealing
+        assertEq(auction.highestBid(), 4 ether);
+        assertEq(auction.secondHighestBid(), 2 ether);
+        assertEq(auction.highestBidder(), bidder1);
     }
 
     function testEndAuctionSetsEndStatusAndSellerReceivableBid() public {
         _startAuctionAsSeller();
         _runTwoBidderFlow();
 
-        assertEq(uint256(proxy.status()), 3); // EndAuctioned
-        assertEq(proxy.highestBid(), 5 ether);
-        assertEq(proxy.secondHighestBid(), 3 ether);
-        assertEq(proxy.bid4Seller(), 3 ether);
+        assertEq(uint256(auction.status()), 3); // EndAuctioned
+        assertEq(auction.highestBid(), 5 ether);
+        assertEq(auction.secondHighestBid(), 3 ether);
+        assertEq(auction.bid4Seller(), 3 ether);
     }
 
     function testWithdrawFundPaysSellerSecondPrice() public {
@@ -146,11 +148,11 @@ contract VickreyAuctionProxyTest is Test {
         uint256 sellerBalanceBefore = seller.balance;
 
         vm.prank(seller);
-        proxy.withdrawFund();
+        auction.withdrawFund();
 
         assertEq(seller.balance, sellerBalanceBefore + 3 ether);
-        assertEq(proxy.bid4Seller(), 0);
-        assertEq(proxy.sellerWithdrawn(), true);
+        assertEq(auction.bid4Seller(), 0);
+        assertEq(auction.sellerWithdrawn(), true);
     }
 
     function testClaimTransfersTokenAndRefundsWinnerExcess() public {
@@ -158,16 +160,16 @@ contract VickreyAuctionProxyTest is Test {
         _runTwoBidderFlow();
 
         vm.prank(seller);
-        proxy.withdrawFund();
+        auction.withdrawFund();
 
         uint256 winnerBalanceBefore = bidder1.balance;
 
         vm.prank(bidder1);
-        proxy.claim();
+        auction.claim();
 
         assertEq(token.balanceOf(bidder1), TOKEN_AMOUNT);
         assertEq(token.balanceOf(address(proxy)), 0);
-        assertEq(proxy.tokenAmount(), 0);
+        assertEq(auction.tokenAmount(), 0);
 
         // winner deposited 5 ether, paid second price 3 ether, refunded 2 ether
         assertEq(bidder1.balance, winnerBalanceBefore + 2 ether);
@@ -180,11 +182,11 @@ contract VickreyAuctionProxyTest is Test {
         uint256 loserBalanceBefore = bidder2.balance;
 
         vm.prank(bidder2);
-        proxy.withdraw();
+        auction.withdraw();
 
         assertEq(bidder2.balance, loserBalanceBefore + 3 ether);
 
-        (/*bidHash*/,/*revealed*/,/*bidAmount*/,uint256 deposit,/*penaltyAmount*/,/*withdrawPenalized*/) = proxy.bids(bidder2);
+        (/*bidHash*/,/*revealed*/,/*bidAmount*/,uint256 deposit,/*penaltyAmount*/,/*withdrawPenalized*/) = auction.bids(bidder2);
         assertEq(deposit, 0);
     }
 
@@ -194,7 +196,7 @@ contract VickreyAuctionProxyTest is Test {
 
         vm.prank(bidder1);
         vm.expectRevert("Only non-winners can withdraw");
-        proxy.withdraw();
+        auction.withdraw();
     }
 
     function testClaimRevertsForNonWinner() public {
@@ -203,7 +205,7 @@ contract VickreyAuctionProxyTest is Test {
 
         vm.prank(bidder2);
         vm.expectRevert("Only winner can claim");
-        proxy.claim();
+        auction.claim();
     }
 
     // ==================== withdrawButNotReveal Tests ====================
@@ -215,31 +217,31 @@ contract VickreyAuctionProxyTest is Test {
         bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
 
         vm.prank(bidder1);
-        proxy.commitBid{value: 5 ether}(bidHash1);
+        auction.commitBid{value: 5 ether}(bidHash1);
 
         vm.prank(bidder2);
-        proxy.commitBid{value: 3 ether}(bidHash2);
+        auction.commitBid{value: 3 ether}(bidHash2);
 
         _moveToRevealPhase();
 
         vm.prank(bidder1);
-        proxy.revealBid(5 ether, "b1-secret");
+        auction.revealBid(5 ether, "b1-secret");
         // bidder2 does NOT reveal
 
         _moveToEndPhase();
 
         vm.prank(bidder1);
-        proxy.endAuction();
+        auction.endAuction();
 
         uint256 bidder2BalanceBefore = bidder2.balance;
         vm.prank(bidder2);
-        proxy.withdrawButNotReveal();
+        auction.withdrawButNotReveal();
 
         // bidder2 should receive 50% of deposit
         assertEq(bidder2.balance, bidder2BalanceBefore + 1.5 ether);
         
         // penaltyAmount should be set to 50%
-        (/*bidHash*/,/*revealed*/,/*bidAmount*/,uint256 deposit,uint256 penaltyAmount,/*withdrawPenalized*/) = proxy.bids(bidder2);
+        (/*bidHash*/,/*revealed*/,/*bidAmount*/,uint256 deposit,uint256 penaltyAmount,/*withdrawPenalized*/) = auction.bids(bidder2);
         assertEq(penaltyAmount, 1.5 ether);
         assertEq(deposit, 1.5 ether); // remaining 50%
     }
@@ -251,7 +253,7 @@ contract VickreyAuctionProxyTest is Test {
         // Winner (bidder1) cannot call withdrawButNotReveal
         vm.prank(bidder1);
         vm.expectRevert("Winner cannot call this function");
-        proxy.withdrawButNotReveal();
+        auction.withdrawButNotReveal();
     }
 
     function testWithdrawButNotRevealOnlyUnrevealedBids() public {
@@ -261,7 +263,7 @@ contract VickreyAuctionProxyTest is Test {
         // bidder2 revealed, so cannot use withdrawButNotReveal
         vm.prank(bidder2);
         vm.expectRevert("Bid already revealed");
-        proxy.withdrawButNotReveal();
+        auction.withdrawButNotReveal();
     }
 
     function testWithdrawButNotRevealCannotCallTwice() public {
@@ -271,29 +273,29 @@ contract VickreyAuctionProxyTest is Test {
         bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
 
         vm.prank(bidder1);
-        proxy.commitBid{value: 5 ether}(bidHash1);
+        auction.commitBid{value: 5 ether}(bidHash1);
 
         vm.prank(bidder2);
-        proxy.commitBid{value: 3 ether}(bidHash2);
+        auction.commitBid{value: 3 ether}(bidHash2);
 
         _moveToRevealPhase();
 
         vm.prank(bidder1);
-        proxy.revealBid(5 ether, "b1-secret");
+        auction.revealBid(5 ether, "b1-secret");
         // bidder2 does NOT reveal
 
         _moveToEndPhase();
 
         vm.prank(bidder1);
-        proxy.endAuction();
+        auction.endAuction();
 
         vm.prank(bidder2);
-        proxy.withdrawButNotReveal();
+        auction.withdrawButNotReveal();
 
         // Second call should revert
         vm.prank(bidder2);
         vm.expectRevert("Already withdrawn with penalty");
-        proxy.withdrawButNotReveal();
+        auction.withdrawButNotReveal();
     }
 
     function testWithdrawButNotRevealRevertsWhenNoDeposit() public {
@@ -302,22 +304,22 @@ contract VickreyAuctionProxyTest is Test {
         bytes32 bidHash1 = _hashBid(5 ether, "b1-secret");
 
         vm.prank(bidder1);
-        proxy.commitBid{value: 5 ether}(bidHash1);
+        auction.commitBid{value: 5 ether}(bidHash1);
 
         _moveToRevealPhase();
 
         vm.prank(bidder1);
-        proxy.revealBid(5 ether, "b1-secret");
+        auction.revealBid(5 ether, "b1-secret");
 
         _moveToEndPhase();
 
         vm.prank(bidder1);
-        proxy.endAuction();
+        auction.endAuction();
 
         address bidder3 = makeAddr("bidder3");
         vm.prank(bidder3);
         vm.expectRevert("No bid committed");
-        proxy.withdrawButNotReveal();
+        auction.withdrawButNotReveal();
     }
 
     // ==================== claimOnBehalf Tests ====================
@@ -333,28 +335,28 @@ contract VickreyAuctionProxyTest is Test {
         vm.deal(bidder3, 10 ether);
 
         vm.prank(bidder1);
-        proxy.commitBid{value: 5 ether}(bidHash1);
+        auction.commitBid{value: 5 ether}(bidHash1);
 
         vm.prank(bidder2);
-        proxy.commitBid{value: 3 ether}(bidHash2);
+        auction.commitBid{value: 3 ether}(bidHash2);
 
         vm.prank(bidder3);
-        proxy.commitBid{value: 2 ether}(bidHash3);
+        auction.commitBid{value: 2 ether}(bidHash3);
 
         _moveToRevealPhase();
 
         vm.prank(bidder1);
-        proxy.revealBid(5 ether, "b1-secret");
+        auction.revealBid(5 ether, "b1-secret");
         // bidder2 and bidder3 do NOT reveal
 
         _moveToEndPhase();
 
         vm.prank(bidder1);
-        proxy.endAuction();
+        auction.endAuction();
 
         uint256 sellerBalanceBefore = seller.balance;
         vm.prank(seller);
-        proxy.claimOnBehalf();
+        auction.claimOnBehalf();
 
         // seller should receive penalties from bidder2 and bidder3
         // bidder2: 3 ether / 2 = 1.5 ether
@@ -369,7 +371,7 @@ contract VickreyAuctionProxyTest is Test {
 
         vm.prank(bidder1);
         vm.expectRevert("Only seller can call this function");
-        proxy.claimOnBehalf();
+        auction.claimOnBehalf();
     }
 
     function testClaimOnBehalfCannotCallTwice() public {
@@ -377,12 +379,12 @@ contract VickreyAuctionProxyTest is Test {
         _runTwoBidderFlow();
 
         vm.prank(seller);
-        proxy.claimOnBehalf();
+        auction.claimOnBehalf();
 
         // Second call should revert
         vm.prank(seller);
         vm.expectRevert("Already claimed on behalf of loser");
-        proxy.claimOnBehalf();
+        auction.claimOnBehalf();
     }
 
     // ==================== withdrawButNotReveal + claimOnBehalf Interaction Tests ====================
@@ -398,35 +400,35 @@ contract VickreyAuctionProxyTest is Test {
         vm.deal(bidder3, 10 ether);
 
         vm.prank(bidder1);
-        proxy.commitBid{value: 5 ether}(bidHash1);
+        auction.commitBid{value: 5 ether}(bidHash1);
 
         vm.prank(bidder2);
-        proxy.commitBid{value: 3 ether}(bidHash2);
+        auction.commitBid{value: 3 ether}(bidHash2);
 
         vm.prank(bidder3);
-        proxy.commitBid{value: 2 ether}(bidHash3);
+        auction.commitBid{value: 2 ether}(bidHash3);
 
         _moveToRevealPhase();
 
         vm.prank(bidder1);
-        proxy.revealBid(5 ether, "b1-secret");
+        auction.revealBid(5 ether, "b1-secret");
         // bidder2 and bidder3 do NOT reveal
 
         _moveToEndPhase();
 
         vm.prank(bidder1);
-        proxy.endAuction();
+        auction.endAuction();
 
         // bidder2 calls withdrawButNotReveal first
         uint256 bidder2BalanceBefore = bidder2.balance;
         vm.prank(bidder2);
-        proxy.withdrawButNotReveal();
+        auction.withdrawButNotReveal();
         assertEq(bidder2.balance, bidder2BalanceBefore + 1.5 ether); // gets 50%
 
         // seller calls claimOnBehalf
         uint256 sellerBalanceBefore = seller.balance;
         vm.prank(seller);
-        proxy.claimOnBehalf();
+        auction.claimOnBehalf();
 
         // seller should receive:
         // - 50% penalty from bidder2 (remaining after bidder2 withdrew)
@@ -435,7 +437,7 @@ contract VickreyAuctionProxyTest is Test {
         assertEq(seller.balance, sellerBalanceBefore + 2.5 ether);
 
         // Verify final states
-        (/*bidHash*/,/*revealed*/,/*bidAmount*/,uint256 deposit,/*penaltyAmount*/,/*withdrawPenalized*/) = proxy.bids(bidder2);
+        (/*bidHash*/,/*revealed*/,/*bidAmount*/,uint256 deposit,/*penaltyAmount*/,/*withdrawPenalized*/) = auction.bids(bidder2);
         assertEq(deposit, 0); // bidder2's deposit fully consumed
     }
 
@@ -446,38 +448,38 @@ contract VickreyAuctionProxyTest is Test {
         bytes32 bidHash2 = _hashBid(3 ether, "b2-secret");
 
         vm.prank(bidder1);
-        proxy.commitBid{value: 5 ether}(bidHash1);
+        auction.commitBid{value: 5 ether}(bidHash1);
 
         vm.prank(bidder2);
-        proxy.commitBid{value: 3 ether}(bidHash2);
+        auction.commitBid{value: 3 ether}(bidHash2);
 
         _moveToRevealPhase();
 
         vm.prank(bidder1);
-        proxy.revealBid(5 ether, "b1-secret");
+        auction.revealBid(5 ether, "b1-secret");
         // bidder2 does NOT reveal
 
         _moveToEndPhase();
 
         vm.prank(bidder1);
-        proxy.endAuction();
+        auction.endAuction();
 
         // seller calls claimOnBehalf first
         uint256 sellerBalanceBefore = seller.balance;
         vm.prank(seller);
-        proxy.claimOnBehalf();
+        auction.claimOnBehalf();
         assertEq(seller.balance, sellerBalanceBefore + 1.5 ether); // gets 50%
 
         // bidder2 calls withdrawButNotReveal after
         uint256 bidder2BalanceBefore = bidder2.balance;
         vm.prank(bidder2);
-        proxy.withdrawButNotReveal();
+        auction.withdrawButNotReveal();
         
         // bidder2 should get remaining 50%
         assertEq(bidder2.balance, bidder2BalanceBefore + 1.5 ether);
 
         // Verify final states
-        (/*bidHash*/,/*revealed*/,/*bidAmount*/,uint256 deposit,uint256 penaltyAmount,/*withdrawPenalized*/) = proxy.bids(bidder2);
+        (/*bidHash*/,/*revealed*/,/*bidAmount*/,uint256 deposit,uint256 penaltyAmount,/*withdrawPenalized*/) = auction.bids(bidder2);
         assertEq(deposit, 0); // deposit fully consumed
         assertEq(penaltyAmount, 1.5 ether); // penalty amount recorded
     }
@@ -490,29 +492,29 @@ contract VickreyAuctionProxyTest is Test {
         bytes32 bidHash2 = _hashBid(4 ether, "b2-secret");
 
         vm.prank(bidder1);
-        proxy.commitBid{value: 6 ether}(bidHash1);
+        auction.commitBid{value: 6 ether}(bidHash1);
 
         vm.prank(bidder2);
-        proxy.commitBid{value: 4 ether}(bidHash2);
+        auction.commitBid{value: 4 ether}(bidHash2);
 
         _moveToRevealPhase();
 
         vm.prank(bidder1);
-        proxy.revealBid(6 ether, "b1-secret");
+        auction.revealBid(6 ether, "b1-secret");
 
         _moveToEndPhase();
 
         vm.prank(bidder1);
-        proxy.endAuction();
+        auction.endAuction();
 
         uint256 bidder2BalanceBefore = bidder2.balance;
         uint256 sellerBalanceBefore = seller.balance;
 
         vm.prank(bidder2);
-        proxy.withdrawButNotReveal();
+        auction.withdrawButNotReveal();
 
         vm.prank(seller);
-        proxy.claimOnBehalf();
+        auction.claimOnBehalf();
 
         // bidder2 gets 50%, seller gets 50%
         assertEq(bidder2.balance, bidder2BalanceBefore + 2 ether); // 4 * 0.5

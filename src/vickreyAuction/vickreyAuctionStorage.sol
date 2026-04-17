@@ -23,7 +23,7 @@ contract VickreyAuctionStorage is ReentrancyGuard {
         uint256 penaltyAmount;
         bool withdrawPenalized;
     }
-    bool internal initialized;
+
     mapping(address => Bid) public bids;
     address[] public bidders;
     AuctionStatus public status;
@@ -64,4 +64,6 @@ contract VickreyAuctionStorage is ReentrancyGuard {
 
     event PenaltyClaimed(address indexed bidder, uint256 penaltyAmount);
     event BidPenalized(address indexed bidder, uint256 penaltyAmount);
+
+    event SellerChanged(address indexed oldSeller, address indexed newSeller);
 }
