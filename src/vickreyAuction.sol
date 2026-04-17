@@ -288,7 +288,6 @@ contract VickreyAuction is ReentrancyGuard {
         require(bidders.length > 0, "No bids placed");
         require(amountOnce > 0, "Invalid amountOnce");
         require(claimOnBehalfOffset < bidders.length, "All bidders have been processed");
-        claimOnBehalfDone = true;
 
         uint256 leftAmount = bidders.length - claimOnBehalfOffset;
         uint256 totalAmount = amountOnce > leftAmount ? leftAmount : amountOnce;
@@ -313,6 +312,9 @@ contract VickreyAuction is ReentrancyGuard {
             }
         }
         claimOnBehalfOffset += totalAmount;
+        if (claimOnBehalfOffset >= bidders.length) {
+            claimOnBehalfDone = true;
+        }
         // not require penaltyAmount > 0, because if it's 0, claimOnBehalf can be called again and again. it waste gas.
         if (penaltyAmount > 0) {
             (bool sent, ) = payable(SELLER).call{value: penaltyAmount}("");
