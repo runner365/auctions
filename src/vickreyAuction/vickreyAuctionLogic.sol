@@ -38,6 +38,7 @@ contract VickreyAuctionLogic is Initializable, UUPSUpgradeable, OwnableUpgradeab
         bid4Seller = 0;
         sellerWithdrawn = false;
         claimedPenaltyDone = false;
+        claimOnBehalfOffset = 0;
 
         commitDuration = _commitDuration;
         revealDuration = _revealDuration;
@@ -235,15 +236,21 @@ contract VickreyAuctionLogic is Initializable, UUPSUpgradeable, OwnableUpgradeab
 
     // punish the bidder who did not reveal their bid before the end of the auction,
     // let the seller claim the half of the deposit as penalty, and the rest of the deposit will be refunded to the bidder
-    function claimOnBehalf() external nonReentrant onlySeller inStatus(AuctionStatus.EndAuctioned) {
+    function claimOnBehalf(uint256 amountOnce) external nonReentrant onlySeller inStatus(AuctionStatus.EndAuctioned) {
         require(status == AuctionStatus.EndAuctioned, "Auction not ended yet");
         require(!claimedPenaltyDone, "Already claimed on behalf of loser");
         require(bidders.length > 0, "No bids placed");
-        claimedPenaltyDone = true;
+        require(amountOnce > 0, "Invalid amountOnce");
+        require(claimOnBehalfOffset < bidders.length, "All bidders have been processed");
+        
+        uint256 leftAmount = bidders.length - claimOnBehalfOffset;
+        uint256 totalAmount = amountOnce > leftAmount ? leftAmount : amountOnce;
 
         uint256 penaltyAmount = 0;
-        for (uint256 i = 0; i < bidders.length; i++) {
-            address bidAddress = bidders[i];
+        uint256 notRevealdCount = 0;
+
+        for (uint256 i = 0; i < totalAmount; i++) {
+            address bidAddress = bidders[claimOnBehalfOffset + i];
             Bid storage bid = bids[bidAddress];
             if (bid.bidHash != bytes32(0) && !bid.revealed && bid.deposit > 0) {
                 uint256 penalty = 0;
@@ -255,13 +262,19 @@ contract VickreyAuctionLogic is Initializable, UUPSUpgradeable, OwnableUpgradeab
                 }
                 bid.deposit -= penalty; // Prevent double claiming of penalty
                 penaltyAmount += penalty;
+                notRevealdCount++;
             }
         }
+        claimOnBehalfOffset += totalAmount;
+        if (claimOnBehalfOffset >= bidders.length) {
+            claimedPenaltyDone = true; // All bidders have been processed
+        }
+
         if (penaltyAmount > 0) {
             (bool sent, ) = payable(seller).call{value: penaltyAmount}("");
             require(sent, "Failed to pay penalty");
 
-            emit BidPenalized(seller, penaltyAmount);
+            emit BidPenalized(seller, penaltyAmount, notRevealdCount);
         }
     }
 

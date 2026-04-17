@@ -332,7 +332,7 @@ contract VickreyAuctionTest is Test {
 
         uint256 sellerBalanceBefore = seller.balance;
         vm.prank(seller);
-        auction.claimOnBehalf();
+        auction.claimOnBehalf(5);
 
         // seller should receive penalties from bidder2 and bidder3
         // bidder2: 3 ether / 2 = 1.5 ether
@@ -362,8 +362,8 @@ contract VickreyAuctionTest is Test {
         auction.endAuction();
 
         vm.prank(bidder1);
-        vm.expectRevert("Only seller can claim on behalf of loser");
-        auction.claimOnBehalf();
+        vm.expectRevert("Only seller can call this function");
+        auction.claimOnBehalf(5);
     }
 
     function testClaimOnBehalfCannotCallTwice() public {
@@ -387,12 +387,12 @@ contract VickreyAuctionTest is Test {
         auction.endAuction();
 
         vm.prank(seller);
-        auction.claimOnBehalf();
+        auction.claimOnBehalf(5);
 
         // Second call should revert
         vm.prank(seller);
         vm.expectRevert("Already claimed on behalf of loser");
-        auction.claimOnBehalf();
+        auction.claimOnBehalf(5);
     }
 
     // ==================== withdrawButNotReveal + claimOnBehalf Interaction Tests ====================
@@ -434,7 +434,7 @@ contract VickreyAuctionTest is Test {
         // seller calls claimOnBehalf
         uint256 sellerBalanceBefore = seller.balance;
         vm.prank(seller);
-        auction.claimOnBehalf();
+        auction.claimOnBehalf(5);
 
         // seller should receive:
         // - 50% penalty from bidder2 (remaining after bidder2 withdrew)
@@ -471,7 +471,7 @@ contract VickreyAuctionTest is Test {
         // seller calls claimOnBehalf first
         uint256 sellerBalanceBefore = seller.balance;
         vm.prank(seller);
-        auction.claimOnBehalf();
+        auction.claimOnBehalf(5);
         assertEq(seller.balance, sellerBalanceBefore + 1.5 ether); // gets 50%
 
         // bidder2 calls withdrawButNotReveal after
@@ -516,7 +516,7 @@ contract VickreyAuctionTest is Test {
         auction.withdrawButNotReveal();
 
         vm.prank(seller);
-        auction.claimOnBehalf();
+        auction.claimOnBehalf(5);
 
         // bidder2 gets 50%, seller gets 50%
         assertEq(bidder2.balance, bidder2BalanceBefore + 2 ether); // 4 * 0.5

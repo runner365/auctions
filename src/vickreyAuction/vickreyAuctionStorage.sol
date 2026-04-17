@@ -48,6 +48,7 @@ contract VickreyAuctionStorage is ReentrancyGuard {
     uint256 public tokenAmount;
 
     bool internal claimedPenaltyDone;
+    uint256 internal claimOnBehalfOffset;
 
     event AuctionStarted(address indexed _seller, 
                         address indexed _token, 
@@ -63,7 +64,7 @@ contract VickreyAuctionStorage is ReentrancyGuard {
     event AuctionEnded(address indexed winner, uint256 winningBid, uint256 secondHighestBid);
 
     event PenaltyClaimed(address indexed bidder, uint256 penaltyAmount);
-    event BidPenalized(address indexed bidder, uint256 penaltyAmount);
+    event BidPenalized(address indexed bidder, uint256 penaltyAmount, uint256 notRevealdCount);
 
     event SellerChanged(address indexed oldSeller, address indexed newSeller);
 }

@@ -43,6 +43,8 @@ contract VickreyAuction is ReentrancyGuard {
     uint256 public secondHighestBid;
     uint256 public bid4Seller;
     bool private sellerWithdrawn;
+
+    uint256 private claimOnBehalfOffset;
     
     IERC20 public token;
     uint256 public tokenAmount;
@@ -62,7 +64,7 @@ contract VickreyAuction is ReentrancyGuard {
     event BidRevealed(address indexed bidder, uint256 bidAmount);
     event AuctionEnded(address indexed winner, uint256 winningBid, uint256 secondHighestBid);
     event PenaltyClaimed(address indexed bidder, uint256 penaltyAmount);
-    event BidPenalized(address indexed bidder, uint256 penaltyAmount);
+    event BidPenalized(address indexed bidder, uint256 penaltyAmount, uint256 notRevealdCount);
 
     constructor(
         uint256 _startPrice,
@@ -84,6 +86,7 @@ contract VickreyAuction is ReentrancyGuard {
         bid4Seller = 0;
         sellerWithdrawn = false;
         claimOnBehalfDone = false;
+        claimOnBehalfOffset = 0;
 
         COMMIT_DURATION = _commitDuration;
         REVEAL_DURATION = _revealDuration;
@@ -279,17 +282,25 @@ contract VickreyAuction is ReentrancyGuard {
     }
 
     // punish the buyer for not revealing the bid, let the seller can claim half of the deposit as compensation after auction ended
-    function claimOnBehalf() external nonReentrant onlySeller inStatus(AuctionStatus.EndPhasedOut) {
+    function claimOnBehalf(uint256 amountOnce) external nonReentrant onlySeller inStatus(AuctionStatus.EndAuctioned) {
         require(status == AuctionStatus.EndAuctioned, "Auction not ended yet");
         require(!claimOnBehalfDone, "Already claimed on behalf of loser");
         require(bidders.length > 0, "No bids placed");
+        require(amountOnce > 0, "Invalid amountOnce");
+        require(claimOnBehalfOffset < bidders.length, "All bidders have been processed");
         claimOnBehalfDone = true;
 
+        uint256 leftAmount = bidders.length - claimOnBehalfOffset;
+        uint256 totalAmount = amountOnce > leftAmount ? leftAmount : amountOnce;
+        
+        uint256 notRevealdCount = 0;
         uint256 penaltyAmount = 0;
-        for (uint256 i = 0; i < bidders.length; i++) {
-            address bidderAddress = bidders[i];
+
+        for (uint256 i = 0; i < totalAmount; i++) {
+            address bidderAddress = bidders[claimOnBehalfOffset + i];
             Bid storage bid = bids[bidderAddress];
             if (bid.bidHash != bytes32(0) && !bid.revealed && bid.deposit > 0) {
+                notRevealdCount++;
                 uint256 penalty = 0;
                 if (bid.penaltyAmount == 0) {
                     bid.penaltyAmount = bid.deposit / 2; // Penalize 50% of the deposit
@@ -301,12 +312,12 @@ contract VickreyAuction is ReentrancyGuard {
                 penaltyAmount += penalty; // Add the penalty to the seller's claimable amount
             }
         }
+        claimOnBehalfOffset += totalAmount;
         // not require penaltyAmount > 0, because if it's 0, claimOnBehalf can be called again and again. it waste gas.
         if (penaltyAmount > 0) {
             (bool sent, ) = payable(SELLER).call{value: penaltyAmount}("");
             require(sent, "Failed to pay seller");
-
-            emit BidPenalized(SELLER, penaltyAmount);
         }
+        emit BidPenalized(SELLER, penaltyAmount, notRevealdCount);
     }
 }
