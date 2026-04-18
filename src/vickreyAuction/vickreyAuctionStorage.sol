@@ -48,7 +48,7 @@ contract VickreyAuctionStorage is ReentrancyGuard {
     uint256 public tokenAmount;
 
     bool internal claimedPenaltyDone;
-    uint256 internal claimOnBehalfOffset;
+    uint256 public claimOnBehalfOffset;
 
     event AuctionStarted(address indexed _seller, 
                         address indexed _token, 

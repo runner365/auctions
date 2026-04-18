@@ -44,7 +44,7 @@ contract VickreyAuction is ReentrancyGuard {
     uint256 public bid4Seller;
     bool private sellerWithdrawn;
 
-    uint256 private claimOnBehalfOffset;
+    uint256 public claimOnBehalfOffset;
     
     IERC20 public token;
     uint256 public tokenAmount;
